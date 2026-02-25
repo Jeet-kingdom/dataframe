@@ -1,9 +1,10 @@
 :set -XOverloadedStrings
 :set -XTypeApplications
 :set -XTemplateHaskell
+:set -XEmptyCase
 
 import qualified Data.Text as T
-import           DataFrame.Functions (declareColumns)
+import           DataFrame.Functions (declareColumns, declareColumnsWithPrefix)
 import           Data.Text (Text)
 import           DataFrame.Operators
 import           Data.Int
@@ -20,6 +21,15 @@ setNumCapabilities $ max 1 (min 4 (n-1))
 default (Int, T.Text, Double)
 
 :def! declareColumns \s -> return ("_ = (); declareColumns " ++ s)
+:{
+:def! declareColumnsWithPrefix \inp ->
+  case words inp of
+    (pre:sParts) ->
+      let s = unwords sParts
+      in return ("_ = (); declareColumnsWithPrefix " ++ pre ++ " " ++ s)
+    _ ->
+      return ":{\n-- usage: :declareColumnsWithPrefix <prefix> <rest>\n:}"
+:}
 :set prompt "\ESC[34m\STXdataframe> \ESC[m\STX"
 
 __brightBlue s = "\ESC[94m" ++ s ++ "\ESC[0m"

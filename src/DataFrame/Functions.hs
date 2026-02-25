@@ -475,10 +475,13 @@ declareColumnsFromCsvWithOpts opts path = do
     declareColumns df
 
 declareColumns :: DataFrame -> DecsQ
-declareColumns = declareColumnsWithPrefix Nothing
+declareColumns = declareColumnsWithPrefix' Nothing
 
-declareColumnsWithPrefix :: Maybe T.Text -> DataFrame -> DecsQ
-declareColumnsWithPrefix prefix df =
+declareColumnsWithPrefix :: T.Text -> DataFrame -> DecsQ
+declareColumnsWithPrefix prefix = declareColumnsWithPrefix' (Just prefix)
+
+declareColumnsWithPrefix' :: Maybe T.Text -> DataFrame -> DecsQ
+declareColumnsWithPrefix' prefix df =
     let
         names = (map fst . L.sortBy (compare `on` snd) . M.toList . columnIndices) df
         types = map (columnTypeString . (`unsafeGetColumn` df)) names
