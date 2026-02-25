@@ -280,6 +280,7 @@ range of value. Going back to our california housing dataset, we can plot a hist
 ```haskell
 D.plotHistogram "median_house_value" df
 ```
+> ```
 > 1501.0│                ▁▁██                                        
 >       │              ▂▂████                                        
 >       │        ██  ▂▂████████                                      
@@ -304,6 +305,7 @@ D.plotHistogram "median_house_value" df
 >        1.5e4                         2.6e5                        5.0e5
 >
 > ⣿ count
+> ```
 
 
 From the histogram above we can already tell things like whether or not there are outliers, the central tendency of the data, and the spread.
