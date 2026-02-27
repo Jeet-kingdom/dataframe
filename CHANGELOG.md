@@ -1,5 +1,18 @@
 # Revision history for dataframe
 
+## 0.5.0.0
+* SortOrder now takes an expression rather than a string.
+* selectBy now respects the original column order.
+* Some changes to the internal representation of the expression GADT.
+* Added fixity to binary operations for column comparisons.
+* Fixed ZSTD decompression for Parquet files.
+* Added logical type handling for timestamps and decimals.
+* aggregation now handles null dataframes gracefully.
+* Drop random dep to 1.2 and use random-shuffle for shuffling instead.
+* Join now merges columns to a `These`.
+* Added writeTsv function.
+* Move expression operators to `Operators` namespace.
+
 ## 0.4.1.0
 * Improve signal handling of dataframe repl.
 * `writeCsv` not correctly writes `Maybe` values (thanks to @mcoady).
