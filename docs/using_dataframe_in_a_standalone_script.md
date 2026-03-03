@@ -4,6 +4,7 @@ What you’ll learn
 * How to write a small, compiled Haskell program that reads a CSV, engineers features, imputes missing values, and filters rows.
 * How Template Haskell column declarations eliminate stringly‑typed references.
 * How using FrameM lets you update a dataframe without threading the df variable by hand.
+* (Advanced) How the `Typed` module helps you write safe data pipeline.
 
 ## Peeking at our file
 We'll be looking at the California Housing dataset for this tutorial. Download the [housing.csv](https://raw.githubusercontent.com/mchav/dataframe/refs/heads/main/data/housing.csv) file into whatever folder you're working from.
@@ -232,3 +233,146 @@ Practical mitigations
 * If you must reuse Exprs outside, pass the updated df' and the Exprs together (use runFrameM instead of the other two evalFrameM) to remind yourself they're from the same logical schema version.
 * Normalize and rename columns immediately after ingest so names are stable throughout the pipeline.
 * Consider module‑scoped helpers that build the “contract” expressions in one place (e.g a function that returns a record of Exprs) so evolution is centralized.
+
+## Is there more?
+
+What if you wanted yet more type safety? What if we wanted to make sure that a column does exist in a dataframe at compile time? What if we wanted to track the schema across complex operations like groupings and joins? Dataframe provides one more level of abstraction for those that want to write data pipelines with virtually no runtime errors. We provide an module called `DataFrame.Typed` that makes this possible.
+
+## The `DataFrame.Typed` module
+
+We mentioned a specific hazard in the previous section where you might accidentally apply an expression built for one dataframe to a completely different one. This happens because the compiler only knows that you have a dataframe, not what columns are inside it. The DataFrame.Typed module offers a powerful solution by moving your schema directly into the Haskell type system. If a column does not exist or if the types do not match, your code simply will not compile.
+
+### Generating a Type Level Schema
+
+To start, we need to define our exact data structure. In the full code example, you will see a Template Haskell function called deriveSchemaFromCsvFile. This function does much more than create variable bindings. It reads your CSV file at compile time and constructs a complete Haskell type named Housing. This new type acts as a strict blueprint representing the exact structure and data types of your underlying file.
+
+```haskell
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+
+import qualified DataFrame as D
+import qualified DataFrame.Typed as DT
+
+$(DT.deriveSchemaFromCsvFile "Housing" "./data/housing.csv")
+
+main :: IO ()
+main = do
+    df <- D.readCsv "./data/housing.csv"
+    print df
+```
+
+You can also define the schema by hand as follows:
+
+```haskell
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+
+import qualified DataFrame as D
+import qualified DataFrame.Typed as DT
+
+type Housing = [ DT.Column "latitude" Double
+               , DT.Column "longitude" Double
+               -- other fields are skipped for brevity.
+               ]
+
+main :: IO ()
+main = do
+    df <- D.readCsv "./data/housing.csv"
+    print df
+```
+
+This is equivalent to what the `TemplateHaskell` is doing under the hood.
+
+### Freezing the Dataframe
+
+When we read data from a file at runtime using D.readCsv, the initial dataframe is dynamic. We need a way to bridge the gap between this dynamic data and our strict Housing blueprint.  We borrow a convention from the `vector` package and call this process "freezing" (and its opposite "thawing"). Freezing a dataframe checks that it conforms to the applied Schema. In our case, it verifies that the dataframe matches the Housing schema we generated above. If everything aligns, it gives us a statically typed dataframe. If there is a mismatch, it throws an error immediately, preventing bad data from moving forward. That way, even the stuff we don't catch at compile it is caught near the beginning of the pipeline (instead of an hour into the pipeline run).
+
+```haskell
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+
+import qualified DataFrame as D
+import qualified DataFrame.Typed as DT
+
+$(DT.deriveSchemaFromCsvFile "Housing" "./data/housing.csv")
+
+main :: IO ()
+main = do
+    df <- D.readCsv "./data/housing.csv"
+    let tdf = either (error . show) id (DT.freezeWithError @Housing df)
+    print tdf
+```
+
+### Statically Typed Transformations
+
+Once your dataframe is safely frozen, you can perform transformations with complete confidence. You will notice the use of the `@` symbol in functions like `DT.derive` and `DT.col`. This syntax is enabled by the `TypeApplications` extension in Haskell. Instead of passing standard string values, we are passing type level strings directly to the compiler. When you write `DT.col @"total_rooms"`, the compiler checks the schema of your dataframe immediately. It verifies that the column exists and knows exactly what type of data it holds. Every time you derive a new column, the compiler automatically updates the schema to include it for the very next step.
+
+```haskell
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeApplication #-}
+
+import qualified DataFrame as D
+import qualified DataFrame.Typed as DT
+
+import DataFrame.Operators ((|>))
+
+$(DT.deriveSchemaFromCsvFile "Housing" "./data/housing.csv")
+
+main :: IO ()
+main = do
+    df <- D.readCsv "./data/housing.csv"
+    let tdf = either (error . show) id (DT.freezeWithError @Housing df)
+    -- We could generate this with `F.declareColumnsFromCsvFile` as before
+    let total_bedrooms = F.col @(Maybe Double) "total_bedrooms"
+    print $ tdf
+          |> DT.derive @"rooms_per_household" (DT.col @"total_rooms" / DT.col @"households")
+          |> DT.impute @"total_bedrooms" (D.meanMaybe total_bedrooms df)
+          |> DT.derive @"bedrooms_per_household" (DT.col @"total_bedrooms" / DT.col @"households")
+          |> DT.derive @"population_per_household" (DT.col @"population" / DT.col @"households")
+```
+
+### Complex Operations
+
+This strict tracking is incredibly useful during complex operations like grouping and aggregating. When the code calls `DT.groupBy @'["ocean_proximity"]` (show below), the compiler guarantees that the column exists before any grouping logic even runs. The aggregation step then ensures that the final output schema correctly reflects only the grouped keys and the newly calculated total column. You cannot accidentally reference a dropped column after an aggregation because the type system will catch the mistake immediately.
+
+```haskell
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeApplications #-}
+
+import qualified DataFrame as D
+import qualified DataFrame.Functions as F
+import qualified DataFrame.Typed as DT
+
+import DataFrame.Operators ((|>))
+
+$(DT.deriveSchemaFromCsvFile "Housing" "./data/housing.csv")
+
+main :: IO ()
+main = do
+    df <- D.readCsv "./data/housing.csv"
+    -- We could generate this with `F.declareColumnsFromCsvFile` as before
+    let total_bedrooms = F.col @(Maybe Double) "total_bedrooms"
+    let tdf = either (error . show) id (DT.freezeWithError @Housing df)
+    print $ tdf
+          |> DT.derive @"rooms_per_household" (DT.col @"total_rooms" / DT.col @"households")
+          |> DT.impute @"total_bedrooms" (D.meanMaybe total_bedrooms df)
+          |> DT.derive @"bedrooms_per_household" (DT.col @"total_bedrooms" / DT.col @"households")
+          |> DT.derive @"population_per_household" (DT.col @"population" / DT.col @"households")
+
+    print $ tdf
+          |> DT.groupBy @'["ocean_proximity"]
+          |> DT.aggregate
+                (DT.agg @"total" (DT.count (DT.col @"median_house_value")) DT.aggNil)
+```
+
+## The Trade Off
+Adopting the typed module requires learning some advanced language extensions and writing a bit more explicit code upfront. The major benefit is that it provides total peace of mind for production data pipelines by virtually eliminating runtime schema errors.
+
+DataFrame provides you with a gauntlet of tools to do everything from quick scripting without any ceremony to pipelines with type-checked schema evolution.
