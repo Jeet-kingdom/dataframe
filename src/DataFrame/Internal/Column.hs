@@ -1,4 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -356,6 +357,31 @@ atIndicesStable indexes (BoxedColumn column) = BoxedColumn $ VG.unsafeBackpermut
 atIndicesStable indexes (UnboxedColumn column) = UnboxedColumn $ VU.unsafeBackpermute column indexes
 atIndicesStable indexes (OptionalColumn column) = OptionalColumn $ VG.unsafeBackpermute column (VG.convert indexes)
 {-# INLINE atIndicesStable #-}
+
+{- | Like 'atIndicesStable' but treats negative indices as null,
+producing an 'OptionalColumn'. Keeps the index vector fully
+unboxed (no @VB.Vector (Maybe Int)@).
+-}
+gatherWithSentinel :: VU.Vector Int -> Column -> Column
+gatherWithSentinel indices col =
+    let !n = VU.length indices
+     in case col of
+            BoxedColumn v ->
+                OptionalColumn $
+                    VB.generate n $ \i ->
+                        let !idx = indices `VU.unsafeIndex` i
+                         in if idx < 0 then Nothing else Just (v `VB.unsafeIndex` idx)
+            UnboxedColumn v ->
+                OptionalColumn $
+                    VB.generate n $ \i ->
+                        let !idx = indices `VU.unsafeIndex` i
+                         in if idx < 0 then Nothing else Just (v `VU.unsafeIndex` idx)
+            OptionalColumn v ->
+                OptionalColumn $
+                    VB.generate n $ \i ->
+                        let !idx = indices `VU.unsafeIndex` i
+                         in if idx < 0 then Nothing else v `VB.unsafeIndex` idx
+{-# INLINE gatherWithSentinel #-}
 
 atIndicesWithNulls :: VB.Vector (Maybe Int) -> Column -> Column
 atIndicesWithNulls indices column =
