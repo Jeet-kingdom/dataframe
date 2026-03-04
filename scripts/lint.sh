@@ -56,7 +56,7 @@ if [[ "$FIX_MODE" == true ]]; then
     total=$((total + 1))
     echo "==> hlint --refactor -i: $file"
 
-    if hlint "$file" --refactor --refactor-options="-i"; then
+    if hlint "$file" --refactor --refactor-options="--inplace"; then
       linted=$((linted + 1))
     else
       failed=$((failed + 1))

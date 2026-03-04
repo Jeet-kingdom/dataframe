@@ -239,7 +239,7 @@ impute value (TDF df) =
 -- | Select a subset of columns by name.
 select ::
     forall (names :: [Symbol]) cols.
-    (AllKnownSymbol names) =>
+    (AllKnownSymbol names, AssertAllPresent names cols) =>
     TypedDataFrame cols -> TypedDataFrame (SubsetSchema names cols)
 select (TDF df) = unsafeFreeze (D.select (symbolVals @names) df)
 

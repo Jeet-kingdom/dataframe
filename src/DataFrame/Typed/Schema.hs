@@ -29,6 +29,7 @@ module DataFrame.Typed.Schema (
     ColumnNames,
     AssertAbsent,
     AssertPresent,
+    AssertAllPresent,
     IsElem,
 
     -- * Maybe-stripping families
@@ -182,6 +183,17 @@ type family
     AssertPresentHelper name 'False cols =
         TypeError
             ('Text "Column '" ':<>: 'Text name ':<>: 'Text "' not found in schema")
+
+-- | Assert that a column name is present in the schema.
+type family AssertAllPresent (name :: [Symbol]) (cols :: [Type]) :: Constraint where
+    AssertAllPresent (name ': rest) cols =
+        If
+            (HasName name cols)
+            (AssertAllPresent rest cols)
+            ( TypeError
+                ('Text "Column '" ':<>: 'Text name ':<>: 'Text "' not found in schema")
+            )
+    AssertAllPresent '[] cols = ()
 
 {- | Strip 'Maybe' from all columns. Used by 'filterAllJust'.
 

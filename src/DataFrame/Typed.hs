@@ -186,6 +186,7 @@ module DataFrame.Typed (
     RightJoinSchema,
     FullOuterJoinSchema,
     AssertAbsent,
+    AssertAllPresent,
     AssertPresent,
 
     -- * Constraints

@@ -43,7 +43,7 @@ grouped = groupBy \@'[\"department\"] employees
 -}
 groupBy ::
     forall (keys :: [Symbol]) cols.
-    (AllKnownSymbol keys) =>
+    (AllKnownSymbol keys, AssertAllPresent keys cols) =>
     TypedDataFrame cols -> TypedGrouped keys cols
 groupBy (TDF df) = TGD (DA.groupBy (symbolVals @keys) df)
 
