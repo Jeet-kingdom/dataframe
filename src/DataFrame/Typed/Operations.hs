@@ -51,8 +51,6 @@ module DataFrame.Typed.Operations (
     -- * Vertical merge
     append,
 
-    -- * Pipe operator
-    (|>),
 ) where
 
 import Data.Function ((&))
@@ -73,18 +71,10 @@ import qualified DataFrame.Operations.Permutation as D
 import qualified DataFrame.Operations.Subset as D
 import qualified DataFrame.Operations.Transformations as D
 
--- Semigroup instance
-
 import DataFrame.Typed.Freeze (unsafeFreeze)
 import DataFrame.Typed.Schema
 import DataFrame.Typed.Types (TExpr (..), TSortOrder (..), TypedDataFrame (..))
 import qualified DataFrame.Typed.Types as T
-
--- | Pipe operator, re-exported for convenience.
-(|>) :: a -> (a -> b) -> b
-(|>) = (&)
-
-infixl 1 |>
 
 -------------------------------------------------------------------------------
 -- Schema-preserving operations
