@@ -7,12 +7,6 @@ import qualified DataFrame.Functions as F
 
 import Control.Monad (void)
 import Criterion.Main
-import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Vector as V
-import DataFrame.Internal.Column (Column (..))
-import DataFrame.Internal.DataFrame (DataFrame (..))
-import DataFrame.Internal.Expression (UExpr)
 import DataFrame.Operations.Join
 import DataFrame.Operators
 import System.Process hiding (env)
