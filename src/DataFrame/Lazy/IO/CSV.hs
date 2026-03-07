@@ -8,24 +8,19 @@
 
 module DataFrame.Lazy.IO.CSV where
 
-import qualified Data.List as L
 import qualified Data.Map as M
-import qualified Data.Set as S
+import qualified Data.Proxy as P
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as VM
-import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 
-import Control.Applicative (many, (<|>))
 import Control.Monad (forM_, unless, when, zipWithM_)
-import Data.Attoparsec.Text
-import Data.Char
-import Data.Foldable (fold)
-import Data.Function (on)
+import Data.Attoparsec.Text (IResult (..), parseWith)
+import Data.Char (intToDigit)
 import Data.IORef
-import Data.Maybe
+import Data.Maybe (fromMaybe, isJust)
 import Data.Type.Equality (TestEquality (testEquality))
 import DataFrame.Internal.Column (
     Column (..),
@@ -36,9 +31,10 @@ import DataFrame.Internal.Column (
  )
 import DataFrame.Internal.DataFrame (DataFrame (..))
 import DataFrame.Internal.Parsing
+import DataFrame.Internal.Schema (Schema, SchemaType (..), elements)
 import System.IO
 import Type.Reflection
-import Prelude hiding (concat, takeWhile)
+import Prelude hiding (takeWhile)
 
 -- | Record for CSV read options.
 data ReadOptions = ReadOptions
@@ -94,11 +90,11 @@ readSeparated c opts path = do
             Nothing -> (0, totalRows)
             Just (start, len) -> (start, min len (totalRows - rowsRead opts))
     withFile path ReadMode $ \handle -> do
-        firstRow <- map T.strip . parseSep c <$> TIO.hGetLine handle
+        firstRow <- fmap T.strip . parseSep c <$> TIO.hGetLine handle
         let columnNames =
                 if hasHeader opts
-                    then map (T.filter (/= '\"')) firstRow
-                    else map (T.singleton . intToDigit) [0 .. (length firstRow - 1)]
+                    then fmap (T.filter (/= '\"')) firstRow
+                    else fmap (T.singleton . intToDigit) [0 .. (length firstRow - 1)]
         -- If there was no header rewind the file cursor.
         unless (hasHeader opts) $ hSeek handle AbsoluteSeek 0
 
@@ -110,13 +106,9 @@ readSeparated c opts path = do
         let numColumns = length columnNames
         let numRows = len
         -- Use this row to infer the types of the rest of the column.
-        -- TODO: this isn't robust but in so far as this is a guess anyway
-        -- it's probably fine. But we should probably sample n rows and pick
-        -- the most likely type from the sample.
         (dataRow, remainder) <- readSingleLine c (leftOver opts) handle
 
         -- This array will track the indices of all null values for each column.
-        -- If any exist then the column will be an optional type.
         nullIndices <- VM.unsafeNew numColumns
         VM.set nullIndices []
         mutableCols <- VM.unsafeNew numColumns
@@ -136,7 +128,7 @@ readSeparated c opts path = do
                 { columns = cols
                 , columnIndices = M.fromList (zip columnNames [0 ..])
                 , dataframeDimensions = (maybe 0 columnLength (cols V.!? 0), V.length cols)
-                , derivingExpressions = M.empty -- TODO create base expressions.
+                , derivingExpressions = M.empty
                 }
             , (pos, unconsumed, r + 1)
             )
@@ -160,35 +152,6 @@ getInitialDataVectors n mCol xs = do
                         )
         VM.unsafeWrite mCol i col
 {-# INLINE getInitialDataVectors #-}
-
-inferValueType :: T.Text -> T.Text
-inferValueType s =
-    let
-        example = s
-     in
-        case readInt example of
-            Just _ -> "Int"
-            Nothing -> case readDouble example of
-                Just _ -> "Double"
-                Nothing -> "Other"
-{-# INLINE inferValueType #-}
-
-readSingleLine :: Char -> T.Text -> Handle -> IO ([T.Text], T.Text)
-readSingleLine c unused handle =
-    parseWith (TIO.hGetChunk handle) (parseRow c) unused >>= \case
-        Fail unconsumed ctx er -> do
-            erpos <- hTell handle
-            fail $
-                "Failed to parse CSV file around "
-                    <> show erpos
-                    <> " byte; due: "
-                    <> show er
-                    <> "; context: "
-                    <> show ctx
-        Partial c -> do
-            fail "Partial handler is called"
-        Done (unconsumed :: T.Text) (row :: [T.Text]) -> do
-            return (row, unconsumed)
 
 -- | Reads rows from the handle and stores values in mutable vectors.
 fillColumns ::
@@ -216,7 +179,7 @@ fillColumns n c mutableCols nullIndices unused handle = do
                             <> show er
                             <> "; context: "
                             <> show ctx
-                Partial c -> do
+                Partial _ -> do
                     fail "Partial handler is called"
                 Done (unconsumed :: T.Text) (row :: [T.Text]) -> do
                     writeIORef input unconsumed
@@ -254,142 +217,131 @@ freezeColumn mutableCols nulls opts colIndex = do
     freezeColumn' (nulls V.! colIndex) col
 {-# INLINE freezeColumn #-}
 
-parseSep :: Char -> T.Text -> [T.Text]
-parseSep c s = either error id (parseOnly (record c) s)
-{-# INLINE parseSep #-}
+-- ---------------------------------------------------------------------------
+-- Streaming scan API
+-- ---------------------------------------------------------------------------
 
-record :: Char -> Parser [T.Text]
-record c =
-    field c `sepBy1` char c
-        <?> "record"
-{-# INLINE record #-}
+{- | Open a CSV/separated file for streaming, returning an open handle
+(positioned just after the header line) and the column specification
+for the schema columns that appear in the file header.
 
-parseRow :: Char -> Parser [T.Text]
-parseRow c = (record c <* lineEnd) <?> "record-new-line"
-
-field :: Char -> Parser T.Text
-field c =
-    quotedField <|> unquotedField c
-        <?> "field"
-{-# INLINE field #-}
-
-unquotedTerminators :: Char -> S.Set Char
-unquotedTerminators sep = S.fromList [sep, '\n', '\r', '"']
-
-unquotedField :: Char -> Parser T.Text
-unquotedField sep =
-    takeWhile (not . (`S.member` terminators)) <?> "unquoted field"
-  where
-    terminators = unquotedTerminators sep
-{-# INLINE unquotedField #-}
-
-quotedField :: Parser T.Text
-quotedField = char '"' *> contents <* char '"' <?> "quoted field"
-  where
-    contents = fold <$> many (unquote <|> unescape)
-      where
-        unquote = takeWhile1 (notInClass "\"\\")
-        unescape =
-            char '\\' *> do
-                T.singleton <$> do
-                    char '\\' <|> char '"'
-{-# INLINE quotedField #-}
-
-lineEnd :: Parser ()
-lineEnd =
-    (endOfLine <|> endOfInput)
-        <?> "end of line"
-{-# INLINE lineEnd #-}
-
--- | First pass to count rows for exact allocation
-countRows :: Char -> FilePath -> IO Int
-countRows c path = withFile path ReadMode $! go 0 ""
-  where
-    go n input h = do
-        isEOF <- hIsEOF h
-        if isEOF && input == mempty
-            then pure n
-            else
-                parseWith (TIO.hGetChunk h) (parseRow c) input >>= \case
-                    Fail unconsumed ctx er -> do
-                        erpos <- hTell h
-                        fail $
-                            "Failed to parse CSV file around "
-                                <> show erpos
-                                <> " byte; due: "
-                                <> show er
-                                <> "; context: "
-                                <> show ctx
-                                <> " "
-                                <> show unconsumed
-                    Partial c -> do
-                        fail $ "Partial handler is called; n = " <> show n
-                    Done (unconsumed :: T.Text) _ ->
-                        go (n + 1) unconsumed h
-{-# INLINE countRows #-}
-
-writeCsv :: FilePath -> DataFrame -> IO ()
-writeCsv = writeSeparated ','
-
-writeSeparated ::
-    -- | Separator
+The caller is responsible for closing the handle when done.
+-}
+openCsvStream ::
     Char ->
-    -- | Path to write to
+    Schema ->
     FilePath ->
-    DataFrame ->
-    IO ()
-writeSeparated c filepath df = withFile filepath WriteMode $ \handle -> do
-    let (rows, _) = dataframeDimensions df
-    let headers = map fst (L.sortBy (compare `on` snd) (M.toList (columnIndices df)))
-    TIO.hPutStrLn handle (T.intercalate ", " headers)
-    forM_ [0 .. (rows - 1)] $ \i -> do
-        let row = getRowAsText df i
-        TIO.hPutStrLn handle (T.intercalate ", " row)
+    IO (Handle, [(Int, T.Text, SchemaType)])
+openCsvStream sep schema path = do
+    handle <- openFile path ReadMode
+    headerLine <- TIO.hGetLine handle
+    let headerCols = fmap (T.filter (/= '"') . T.strip) (parseSep sep headerLine)
+    let schemaMap = elements schema
+    let colSpec =
+            [ (idx, name, stype)
+            | (idx, name) <- zip [0 ..] headerCols
+            , Just stype <- [M.lookup name schemaMap]
+            ]
+    when (null colSpec) $
+        hClose handle
+            >> fail
+                ("openCsvStream: none of the schema columns appear in the header of " <> path)
+    return (handle, colSpec)
 
-getRowAsText :: DataFrame -> Int -> [T.Text]
-getRowAsText df i = V.ifoldr go [] (columns df)
-  where
-    indexMap = M.fromList (map (\(a, b) -> (b, a)) $ M.toList (columnIndices df))
-    go k (BoxedColumn (c :: V.Vector a)) acc = case c V.!? i of
-        Just e -> textRep : acc
-          where
-            textRep = case testEquality (typeRep @a) (typeRep @T.Text) of
-                Just Refl -> e
-                Nothing -> case typeRep @a of
-                    App t1 t2 -> case eqTypeRep t1 (typeRep @Maybe) of
-                        Just HRefl -> case testEquality t2 (typeRep @T.Text) of
-                            Just Refl -> fromMaybe "null" e
-                            Nothing -> (fromOptional . (T.pack . show)) e
-                              where
-                                fromOptional s
-                                    | T.isPrefixOf "Just " s = T.drop (T.length "Just ") s
-                                    | otherwise = "null"
-                        Nothing -> (T.pack . show) e
-                    _ -> (T.pack . show) e
-        Nothing ->
-            error $
-                "Column "
-                    ++ T.unpack (indexMap M.! k)
-                    ++ " has less items than "
-                    ++ "the other columns at index "
-                    ++ show i
-    go k (UnboxedColumn c) acc = case c VU.!? i of
-        Just e -> T.pack (show e) : acc
-        Nothing ->
-            error $
-                "Column "
-                    ++ T.unpack (indexMap M.! k)
-                    ++ " has less items than "
-                    ++ "the other columns at index "
-                    ++ show i
-    go k (OptionalColumn (c :: V.Vector (Maybe a))) acc = case c V.!? i of
-        Just e -> case testEquality (typeRep @a) (typeRep @T.Text) of
-            Just Refl -> fromMaybe T.empty e : acc
-            Nothing -> maybe T.empty (T.pack . show) e : acc
-        Nothing ->
-            error $
-                "Column "
-                    ++ T.unpack (indexMap M.! k)
-                    ++ " has less items than "
-                    ++ "the other columns at index "
-                    ++ show i
+{- | Read up to @batchSz@ rows from the open handle, returning a batch
+'DataFrame' and the unconsumed leftover text.  Returns 'Nothing' when
+the handle is at EOF and there is no leftover input.
+
+The caller must pass the leftover returned by the previous call (use @""@
+for the first call).
+-}
+readBatch ::
+    Char ->
+    [(Int, T.Text, SchemaType)] ->
+    Int ->
+    T.Text ->
+    Handle ->
+    IO (Maybe (DataFrame, T.Text))
+readBatch sep colSpec batchSz leftover handle = do
+    isEof <- hIsEOF handle
+    if isEof && T.null leftover
+        then return Nothing
+        else do
+            let numCols = length colSpec
+            nullsArr <- VM.unsafeNew numCols
+            VM.set nullsArr []
+            mCols <- VM.unsafeNew numCols
+            forM_ (zip [0 ..] colSpec) $ \(ci, (_, _, st)) ->
+                VM.unsafeWrite mCols ci =<< makeCol batchSz st
+            leftoverRef <- newIORef leftover
+            rowCountRef <- newIORef (0 :: Int)
+            let loop = do
+                    rc <- readIORef rowCountRef
+                    when (rc < batchSz) $ do
+                        lo <- readIORef leftoverRef
+                        eof <- hIsEOF handle
+                        unless (eof && T.null lo) $ do
+                            parseWith (TIO.hGetChunk handle) (parseRow sep) lo >>= \case
+                                Fail _ ctx er ->
+                                    fail
+                                        ( "readBatch: parse error near row "
+                                            <> ( show rc
+                                                    <> ( ": "
+                                                            <> ( er
+                                                                    <> ( " ctx: "
+                                                                            ++ show ctx
+                                                                       )
+                                                               )
+                                                       )
+                                               )
+                                        )
+                                Partial _ -> fail "readBatch: unexpected Partial"
+                                Done rest row -> do
+                                    writeIORef leftoverRef rest
+                                    forM_ (zip [0 ..] colSpec) $ \(ci, (fi, _, _)) -> do
+                                        let val = if fi < length row then row !! fi else ""
+                                        col <- VM.unsafeRead mCols ci
+                                        res <- writeColumn rc val col
+                                        case res of
+                                            Left nv -> VM.unsafeModify nullsArr ((rc, nv) :) ci
+                                            Right _ -> return ()
+                                    modifyIORef' rowCountRef (+ 1)
+                                    loop
+            loop
+            actualRows <- readIORef rowCountRef
+            finalLeftover <- readIORef leftoverRef
+            if actualRows == 0
+                then return Nothing
+                else do
+                    forM_ [0 .. numCols - 1] $ \ci -> do
+                        col <- VM.unsafeRead mCols ci
+                        VM.unsafeWrite mCols ci (sliceCol actualRows col)
+                    nullsVec <- V.unsafeFreeze nullsArr
+                    cols <- V.generateM numCols $ \ci -> do
+                        col <- VM.unsafeRead mCols ci
+                        freezeColumn' (nullsVec V.! ci) col
+                    let colNames = [name | (_, name, _) <- colSpec]
+                    return $
+                        Just
+                            ( DataFrame
+                                { columns = cols
+                                , columnIndices = M.fromList (zip colNames [0 ..])
+                                , dataframeDimensions = (actualRows, numCols)
+                                , derivingExpressions = M.empty
+                                }
+                            , finalLeftover
+                            )
+
+-- | Allocate a fresh 'MutableColumn' for @n@ slots based on a 'SchemaType'.
+makeCol :: Int -> SchemaType -> IO MutableColumn
+makeCol n (SType (_ :: P.Proxy a)) =
+    case testEquality (typeRep @a) (typeRep @Int) of
+        Just Refl -> MUnboxedColumn <$> (VUM.unsafeNew n :: IO (VUM.IOVector Int))
+        Nothing -> case testEquality (typeRep @a) (typeRep @Double) of
+            Just Refl -> MUnboxedColumn <$> (VUM.unsafeNew n :: IO (VUM.IOVector Double))
+            Nothing -> MBoxedColumn <$> (VM.unsafeNew n :: IO (VM.IOVector T.Text))
+
+-- | Slice a 'MutableColumn' to @n@ elements (no-copy view).
+sliceCol :: Int -> MutableColumn -> MutableColumn
+sliceCol n (MBoxedColumn col) = MBoxedColumn (VM.take n col)
+sliceCol n (MUnboxedColumn col) = MUnboxedColumn (VUM.take n col)

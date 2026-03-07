@@ -1,107 +1,125 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module DataFrame.Lazy.Internal.DataFrame where
 
-import Control.Monad (foldM)
-import qualified Data.List as L
 import qualified Data.Text as T
 import qualified DataFrame.Internal.Column as C
 import qualified DataFrame.Internal.DataFrame as D
 import qualified DataFrame.Internal.Expression as E
-import qualified DataFrame.Lazy.IO.CSV as D
-import DataFrame.Operations.Merge ()
-import qualified DataFrame.Operations.Subset as D
-import qualified DataFrame.Operations.Transformations as D
+import DataFrame.Internal.Schema (Schema)
+import DataFrame.Lazy.Internal.Executor (
+    ExecutorConfig (..),
+    defaultExecutorConfig,
+    execute,
+ )
+import DataFrame.Lazy.Internal.LogicalPlan (
+    DataSource (..),
+    LogicalPlan (..),
+    SortOrder (..),
+ )
+import qualified DataFrame.Lazy.Internal.Optimizer as Opt
+import DataFrame.Operations.Join (JoinType)
 
-data LazyOperation where
-    Derive :: (C.Columnable a) => T.Text -> E.Expr a -> LazyOperation
-    Select :: [T.Text] -> LazyOperation
-    Filter :: E.Expr Bool -> LazyOperation
+{- | A lazy query that has not been executed yet.
 
-instance Show LazyOperation where
-    show :: LazyOperation -> String
-    show (Derive name expr) = T.unpack name ++ " := " ++ show expr
-    show (Select columns) = "select(" ++ show columns ++ ")"
-    show (Filter expr) = "filter(" ++ show expr ++ ")"
-
-data InputType = ICSV deriving (Show)
-
+The query is represented as a 'LogicalPlan' tree; execution is deferred
+until 'runDataFrame' is called.
+-}
 data LazyDataFrame = LazyDataFrame
-    { inputPath :: FilePath
-    , inputType :: InputType
-    , operations :: [LazyOperation]
+    { plan :: LogicalPlan
     , batchSize :: Int
     }
-    deriving (Show)
 
-eval :: LazyOperation -> D.DataFrame -> D.DataFrame
-eval (Derive name expr) = D.derive name expr
-eval (Select columns) = D.select columns
-eval (Filter expr) = D.filterWhere expr
+instance Show LazyDataFrame where
+    show ldf =
+        "LazyDataFrame { batchSize = "
+            <> (show (batchSize ldf) <> (", plan = " <> (show (plan ldf) <> " }")))
 
-runDataFrame :: forall a. (C.Columnable a) => LazyDataFrame -> IO D.DataFrame
-runDataFrame df = do
-    let path = inputPath df
-    totalRows <- D.countRows ',' path
-    let batches = batchRanges totalRows (batchSize df)
-    (df', _) <-
-        foldM
-            ( \(accDf, (pos, unused, r)) (start, end) -> do
-                mapM_
-                    putStr
-                    [ "Scanning: "
-                    , show start
-                    , " to "
-                    , show end
-                    , " rows out of "
-                    , show totalRows
-                    , "\n"
-                    ]
+-- ---------------------------------------------------------------------------
+-- Entry point
+-- ---------------------------------------------------------------------------
 
-                (sdf, (pos', unconsumed, rowsRead)) <-
-                    D.readSeparated
-                        ','
-                        ( D.defaultOptions
-                            { D.rowRange = Just (start, batchSize df)
-                            , D.totalRows = Just totalRows
-                            , D.seekPos = pos
-                            , D.rowsRead = r
-                            , D.leftOver = unused
-                            }
-                        )
-                        path
-                let rdf = L.foldl' (flip eval) sdf (operations df)
-                return (accDf <> rdf, (Just pos', unconsumed, rowsRead + r))
-            )
-            (D.empty, (Nothing, "", 0))
-            batches
-    return df'
+{- | Execute the lazy query: optimise the logical plan, then stream-execute
+the resulting physical plan, returning a fully-materialised 'D.DataFrame'.
+-}
+runDataFrame :: LazyDataFrame -> IO D.DataFrame
+runDataFrame ldf = do
+    let physPlan = Opt.optimize (batchSize ldf) (plan ldf)
+    execute physPlan defaultExecutorConfig{defaultBatchSize = batchSize ldf}
 
-batchRanges :: Int -> Int -> [(Int, Int)]
-batchRanges n inc = go n [0, inc .. n]
-  where
-    go _ [] = []
-    go n [x] = [(x, n)]
-    go n (f : s : rest) = (f, s) : go n (s : rest)
+-- ---------------------------------------------------------------------------
+-- Builders that construct the logical plan tree
+-- ---------------------------------------------------------------------------
 
-scanCsv :: T.Text -> LazyDataFrame
-scanCsv path = LazyDataFrame (T.unpack path) ICSV [] 512_000
+-- | Scan a CSV file with the default comma separator.
+scanCsv :: Schema -> T.Text -> LazyDataFrame
+scanCsv schema path =
+    LazyDataFrame
+        { plan = Scan (CsvSource (T.unpack path) ',') schema
+        , batchSize = 512_000
+        }
 
-addOperation :: LazyOperation -> LazyDataFrame -> LazyDataFrame
-addOperation op df = df{operations = operations df ++ [op]}
+-- | Scan a character-separated file.
+scanSeparated :: Char -> Schema -> T.Text -> LazyDataFrame
+scanSeparated sep schema path =
+    LazyDataFrame
+        { plan = Scan (CsvSource (T.unpack path) sep) schema
+        , batchSize = 512_000
+        }
 
+-- | Add a computed column (or overwrite an existing one).
 derive ::
     (C.Columnable a) => T.Text -> E.Expr a -> LazyDataFrame -> LazyDataFrame
-derive name expr = addOperation (Derive name expr)
+derive name expr ldf =
+    ldf{plan = Derive name (E.UExpr expr) (plan ldf)}
 
-select :: (C.Columnable a) => [T.Text] -> LazyDataFrame -> LazyDataFrame
-select columns = addOperation (Select columns)
+-- | Retain only the listed columns.
+select :: [T.Text] -> LazyDataFrame -> LazyDataFrame
+select cols ldf = ldf{plan = Project cols (plan ldf)}
 
-filter :: (C.Columnable a) => E.Expr Bool -> LazyDataFrame -> LazyDataFrame
-filter cond = addOperation (Filter cond)
+-- | Keep rows that satisfy the predicate.
+filter :: E.Expr Bool -> LazyDataFrame -> LazyDataFrame
+filter cond ldf = ldf{plan = Filter cond (plan ldf)}
+
+-- | Join two lazy queries on the given key columns.
+join ::
+    JoinType ->
+    -- | Left join key column name
+    T.Text ->
+    -- | Right join key column name
+    T.Text ->
+    -- | Left sub-query
+    LazyDataFrame ->
+    -- | Right sub-query
+    LazyDataFrame ->
+    LazyDataFrame
+join jt leftKey rightKey left right =
+    LazyDataFrame
+        { plan = Join jt leftKey rightKey (plan left) (plan right)
+        , batchSize = batchSize left
+        }
+
+{- | Group by a set of columns and compute aggregate expressions.
+
+Each aggregate expression should use an 'Agg' node (e.g. @sumOf@, @meanOf@).
+-}
+groupBy ::
+    -- | Group-by key columns
+    [T.Text] ->
+    -- | @[(outputName, aggregateExpr)]@
+    [(T.Text, E.UExpr)] ->
+    LazyDataFrame ->
+    LazyDataFrame
+groupBy keys aggs ldf = ldf{plan = Aggregate keys aggs (plan ldf)}
+
+-- | Sort the result by the given @(column, direction)@ pairs.
+sortBy :: [(T.Text, SortOrder)] -> LazyDataFrame -> LazyDataFrame
+sortBy cols ldf = ldf{plan = Sort cols (plan ldf)}
+
+-- | Retain at most @n@ rows.
+limit :: Int -> LazyDataFrame -> LazyDataFrame
+limit n ldf = ldf{plan = Limit n (plan ldf)}

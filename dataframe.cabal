@@ -89,7 +89,12 @@ library
                     DataFrame.IO.Parquet.Time,
                     DataFrame.IO.Parquet.Types,
                     DataFrame.Lazy.IO.CSV,
+                    DataFrame.Lazy.IO.Binary,
                     DataFrame.Lazy.Internal.DataFrame,
+                    DataFrame.Lazy.Internal.LogicalPlan,
+                    DataFrame.Lazy.Internal.PhysicalPlan,
+                    DataFrame.Lazy.Internal.Optimizer,
+                    DataFrame.Lazy.Internal.Executor,
                     DataFrame.Monad,
                     DataFrame.DecisionTree,
                     DataFrame.Typed.Types,
@@ -103,6 +108,7 @@ library
                     DataFrame.Typed.Expr,
                     DataFrame.Typed
     build-depends:    base >= 4 && <5,
+                      binary >= 0.8 && < 1,
                       aeson >= 0.11.0.0 && < 3,
                       array >= 0.5.4.0 && < 0.6,
                       attoparsec >= 0.12 && < 0.15,
@@ -129,6 +135,7 @@ library
                       zstd >= 0.1.2.0 && < 0.2,
                       mmap >= 0.5.8 && < 0.6,
                       parallel >= 3.2.2.0 && < 5,
+                      stm >= 2.5 && < 3,
                       filepath >= 1.4 && < 2,
                       Glob >= 0.10 && < 1,
 
@@ -175,6 +182,21 @@ executable dataframe
     hs-source-dirs:   app
     default-language: Haskell2010
     ghc-options: -rtsopts -threaded -with-rtsopts=-N
+
+executable lazy-bench
+    import: warnings
+    main-is: LazyBenchmark.hs
+    build-depends:    base >= 4 && < 5,
+                      bytestring >= 0.11 && < 0.13,
+                      containers >= 0.6.7 && < 0.9,
+                      dataframe >= 0.5 && < 1,
+                      directory >= 1.3.0.0 && < 2,
+                      random >= 1 && < 2,
+                      text >= 2.0 && < 3,
+                      time >= 1.12 && < 2,
+    hs-source-dirs:   app
+    default-language: Haskell2010
+    ghc-options: -rtsopts -threaded -with-rtsopts=-N -O2
 
 benchmark dataframe-benchmark
     import: warnings

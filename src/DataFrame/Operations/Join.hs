@@ -36,6 +36,7 @@ data JoinType
     | LEFT
     | RIGHT
     | FULL_OUTER
+    deriving (Show)
 
 -- | Join two dataframes using SQL join semantics.
 join ::
