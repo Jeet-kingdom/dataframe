@@ -237,7 +237,7 @@ readParquetFilesWithOpts :: ParquetReadOptions -> FilePath -> IO DataFrame
 readParquetFilesWithOpts opts path = do
     isDir <- doesDirectoryExist path
 
-    let pat = if isDir then path </> "*" else path
+    let pat = if isDir then path </> "*.parquet" else path
 
     matches <- glob pat
 
