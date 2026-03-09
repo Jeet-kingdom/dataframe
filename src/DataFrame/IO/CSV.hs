@@ -126,9 +126,20 @@ freezePagedVector (PagedVector chunksRef activeRef countRef) = do
     active <- readIORef activeRef
     chunks <- readIORef chunksRef
 
-    lastChunk <- V.unsafeFreeze (VM.slice 0 count active)
+    writeIORef chunksRef [] -- release chunk references
+    let frozenChunks = reverse chunks
+        totalLen = count + sum (map V.length frozenChunks)
 
-    return $! V.concat (reverse (lastChunk : chunks))
+    mv <- VM.unsafeNew totalLen
+
+    let copyChunk !offset chunk = do
+            V.copy (VM.slice offset (V.length chunk) mv) chunk
+            pure (offset + V.length chunk)
+
+    offset <- foldM copyChunk 0 frozenChunks
+    VM.copy (VM.slice offset count mv) (VM.slice 0 count active)
+
+    V.unsafeFreeze mv
 
 freezePagedUnboxedVector ::
     (VUM.Unbox a) => PagedUnboxedVector a -> IO (VU.Vector a)
@@ -137,8 +148,20 @@ freezePagedUnboxedVector (PagedUnboxedVector chunksRef activeRef countRef) = do
     active <- readIORef activeRef
     chunks <- readIORef chunksRef
 
-    lastChunk <- VU.unsafeFreeze (VUM.slice 0 count active)
-    return $! VU.concat (reverse (lastChunk : chunks))
+    writeIORef chunksRef [] -- release chunk references
+    let frozenChunks = reverse chunks
+        totalLen = count + sum (map VU.length frozenChunks)
+
+    mv <- VUM.unsafeNew totalLen
+
+    let copyChunk !offset chunk = do
+            VU.copy (VUM.slice offset (VU.length chunk) mv) chunk
+            pure (offset + VU.length chunk)
+
+    offset <- foldM copyChunk 0 frozenChunks
+    VUM.copy (VUM.slice offset count mv) (VUM.slice 0 count active)
+
+    VU.unsafeFreeze mv
 
 -- | STANDARD CONFIG TYPES
 data HeaderSpec = NoHeader | UseFirstRow | ProvideNames [T.Text]

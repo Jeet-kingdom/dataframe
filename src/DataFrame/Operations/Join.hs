@@ -10,7 +10,7 @@
 module DataFrame.Operations.Join where
 
 import Control.Applicative ((<|>))
-import Control.Monad (forM_)
+import Control.Monad (forM_, when)
 import Control.Monad.ST (ST, runST)
 import qualified Data.HashMap.Strict as HM
 import Data.List (foldl')
@@ -73,12 +73,7 @@ contiguous runs to populate the offset map.
 buildCompactIndex :: VU.Vector Int -> CompactIndex
 buildCompactIndex hashes =
     let n = VU.length hashes
-        sorted = runST $ do
-            mv <- VU.thaw (VU.zip hashes (VU.enumFromN 0 n))
-            VA.sortBy (\(h1, _) (h2, _) -> compare h1 h2) mv
-            VU.unsafeFreeze mv
-        sortedHashes = VU.map fst sorted
-        sortedIndices = VU.map snd sorted
+        (sortedHashes, sortedIndices) = sortWithIndices hashes
         !offsets = buildOffsets sortedHashes n 0 HM.empty
      in CompactIndex sortedIndices offsets
   where
@@ -103,15 +98,19 @@ findGroupEnd !v !h !j !n
     | otherwise = j
 {-# INLINE findGroupEnd #-}
 
--- | Sort a hash vector, returning sorted hashes and corresponding original indices.
+{- | Sort a hash vector, returning sorted hashes and corresponding original indices.
+Sorts an index array using hash values as the comparison key, avoiding the
+intermediate pair vector used by the naive zip-then-sort approach.
+-}
 sortWithIndices :: VU.Vector Int -> (VU.Vector Int, VU.Vector Int)
-sortWithIndices hashes =
+sortWithIndices hashes = runST $ do
     let n = VU.length hashes
-        sorted = runST $ do
-            mv <- VU.thaw (VU.zip hashes (VU.enumFromN 0 n))
-            VA.sortBy (\(h1, _) (h2, _) -> compare h1 h2) mv
-            VU.unsafeFreeze mv
-     in (VU.map fst sorted, VU.map snd sorted)
+    mv <- VU.thaw (VU.enumFromN 0 n)
+    VA.sortBy
+        (\i j -> compare (hashes `VU.unsafeIndex` i) (hashes `VU.unsafeIndex` j))
+        mv
+    sortedIdxs <- VU.unsafeFreeze mv
+    return (VU.unsafeBackpermute hashes sortedIdxs, sortedIdxs)
 
 -- | Write the cross product of two index ranges into mutable vectors.
 fillCrossProduct ::
@@ -202,6 +201,8 @@ innerJoin cs left right
 Builds compact index on @buildHashes@ (second arg), probes with
 @probeHashes@ (first arg).
 Returns @(probeExpandedIndices, buildExpandedIndices)@.
+Uses a dynamically growing output buffer to avoid pre-allocating the full
+cross-product size (which can be astronomically large for low-cardinality keys).
 -}
 hashInnerKernel ::
     VU.Vector Int -> VU.Vector Int -> (VU.Vector Int, VU.Vector Int)
@@ -210,24 +211,30 @@ hashInnerKernel probeHashes buildHashes = runST $ do
         ciIxs = ciSortedIndices ci
         ciOff = ciOffsets ci
         !probeN = VU.length probeHashes
+        !buildN = VU.length buildHashes
+        initCap = max 1 (min (probeN + buildN) 1_000_000)
 
-    -- Pass 1: count total output rows
-    let !totalRows =
-            VU.foldl'
-                ( \acc h ->
-                    case HM.lookup h ciOff of
-                        Nothing -> acc
-                        Just (_, len) -> acc + len
-                )
-                0
-                probeHashes
-
-    -- Pass 2: fill output vectors
-    pv <- VUM.unsafeNew totalRows
-    bv <- VUM.unsafeNew totalRows
+    initPv <- VUM.unsafeNew initCap
+    initBv <- VUM.unsafeNew initCap
+    pvRef <- newSTRef initPv
+    bvRef <- newSTRef initBv
+    capRef <- newSTRef initCap
     posRef <- newSTRef (0 :: Int)
 
-    let go !i
+    let ensureCapacity needed = do
+            cap <- readSTRef capRef
+            when (needed > cap) $ do
+                let newCap = max needed (cap * 2)
+                    delta = newCap - cap
+                pv <- readSTRef pvRef
+                bv <- readSTRef bvRef
+                newPv <- VUM.unsafeGrow pv delta
+                newBv <- VUM.unsafeGrow bv delta
+                writeSTRef pvRef newPv
+                writeSTRef bvRef newBv
+                writeSTRef capRef newCap
+
+        go !i
             | i >= probeN = return ()
             | otherwise = do
                 let !h = probeHashes `VU.unsafeIndex` i
@@ -235,22 +242,32 @@ hashInnerKernel probeHashes buildHashes = runST $ do
                     Nothing -> go (i + 1)
                     Just (!start, !len) -> do
                         !p <- readSTRef posRef
-                        fillBuild i start len p 0
+                        ensureCapacity (p + len)
+                        pv <- readSTRef pvRef
+                        bv <- readSTRef bvRef
+                        fillBuild i start len p 0 pv bv
                         writeSTRef posRef (p + len)
                         go (i + 1)
-        fillBuild !probeIdx !start !len !p !j
+        fillBuild !probeIdx !start !len !p !j !pv !bv
             | j >= len = return ()
             | otherwise = do
                 VUM.unsafeWrite pv (p + j) probeIdx
                 VUM.unsafeWrite bv (p + j) (ciIxs `VU.unsafeIndex` (start + j))
-                fillBuild probeIdx start len p (j + 1)
+                fillBuild probeIdx start len p (j + 1) pv bv
     go 0
 
-    (,) <$> VU.unsafeFreeze pv <*> VU.unsafeFreeze bv
+    !total <- readSTRef posRef
+    pv <- readSTRef pvRef
+    bv <- readSTRef bvRef
+    (,)
+        <$> VU.unsafeFreeze (VUM.slice 0 total pv)
+        <*> VU.unsafeFreeze (VUM.slice 0 total bv)
 
 {- | Sort-merge inner join kernel.
 Sorts both sides by hash, walks in lockstep.
 Returns @(leftExpandedIndices, rightExpandedIndices)@.
+Uses a dynamically growing output buffer instead of a two-pass count-then-allocate
+strategy, which OOMs when low-cardinality keys produce large cross products.
 -}
 sortMergeInnerKernel ::
     VU.Vector Int -> VU.Vector Int -> (VU.Vector Int, VU.Vector Int)
@@ -259,41 +276,72 @@ sortMergeInnerKernel leftHashes rightHashes = runST $ do
         (rightSH, rightSI) = sortWithIndices rightHashes
         !leftN = VU.length leftHashes
         !rightN = VU.length rightHashes
+        initCap = max 1 (min (leftN + rightN) 1_000_000)
 
-    -- Pass 1: count
-    let countLoop !li !ri !c
-            | li >= leftN || ri >= rightN = c
-            | lh < rh = countLoop (li + 1) ri c
-            | lh > rh = countLoop li (ri + 1) c
-            | otherwise =
-                let !lEnd = findGroupEnd leftSH lh (li + 1) leftN
-                    !rEnd = findGroupEnd rightSH rh (ri + 1) rightN
-                 in countLoop lEnd rEnd (c + (lEnd - li) * (rEnd - ri))
-          where
-            !lh = leftSH `VU.unsafeIndex` li
-            !rh = rightSH `VU.unsafeIndex` ri
-        !totalRows = countLoop 0 0 0
+    initLv <- VUM.unsafeNew initCap
+    initRv <- VUM.unsafeNew initCap
+    lvRef <- newSTRef initLv
+    rvRef <- newSTRef initRv
+    capRef <- newSTRef initCap
+    posRef <- newSTRef (0 :: Int)
 
-    -- Pass 2: fill
-    lv <- VUM.unsafeNew totalRows
-    rv <- VUM.unsafeNew totalRows
+    let ensureCapacity needed = do
+            cap <- readSTRef capRef
+            when (needed > cap) $ do
+                let newCap = max needed (cap * 2)
+                    delta = newCap - cap
+                lv <- readSTRef lvRef
+                rv <- readSTRef rvRef
+                newLv <- VUM.unsafeGrow lv delta
+                newRv <- VUM.unsafeGrow rv delta
+                writeSTRef lvRef newLv
+                writeSTRef rvRef newRv
+                writeSTRef capRef newCap
 
-    let fill !li !ri !pos
+        fillGroup !li !lEnd !ri !rEnd = do
+            let !lLen = lEnd - li
+                !rLen = rEnd - ri
+                !groupSize = lLen * rLen
+            !p <- readSTRef posRef
+            ensureCapacity (p + groupSize)
+            lv <- readSTRef lvRef
+            rv <- readSTRef rvRef
+            let goL !lIdx !pos
+                    | lIdx >= lEnd = return ()
+                    | otherwise = do
+                        let !lOrig = leftSI `VU.unsafeIndex` lIdx
+                        goR lOrig ri pos
+                        goL (lIdx + 1) (pos + rLen)
+                goR !lOrig !rIdx !pos
+                    | rIdx >= rEnd = return ()
+                    | otherwise = do
+                        VUM.unsafeWrite lv pos lOrig
+                        VUM.unsafeWrite rv pos (rightSI `VU.unsafeIndex` rIdx)
+                        goR lOrig (rIdx + 1) (pos + 1)
+            goL li p
+            writeSTRef posRef (p + groupSize)
+
+        fill !li !ri
             | li >= leftN || ri >= rightN = return ()
-            | lh < rh = fill (li + 1) ri pos
-            | lh > rh = fill li (ri + 1) pos
+            | lh < rh = fill (li + 1) ri
+            | lh > rh = fill li (ri + 1)
             | otherwise = do
                 let !lEnd = findGroupEnd leftSH lh (li + 1) leftN
                     !rEnd = findGroupEnd rightSH rh (ri + 1) rightN
-                    !groupSize = (lEnd - li) * (rEnd - ri)
-                fillCrossProduct leftSI rightSI li lEnd ri rEnd lv rv pos
-                fill lEnd rEnd (pos + groupSize)
+                fillGroup li lEnd ri rEnd
+                fill lEnd rEnd
           where
             !lh = leftSH `VU.unsafeIndex` li
             !rh = rightSH `VU.unsafeIndex` ri
 
-    fill 0 0 0
-    (,) <$> VU.unsafeFreeze lv <*> VU.unsafeFreeze rv
+    fill 0 0
+
+    !total <- readSTRef posRef
+    lv <- readSTRef lvRef
+    rv <- readSTRef rvRef
+    (,)
+        <$> VU.unsafeFreeze (VUM.slice 0 total lv)
+        <*> VU.unsafeFreeze (VUM.slice 0 total rv)
 
 -- | Assemble the result DataFrame for an inner join from expanded index vectors.
 assembleInner ::
@@ -400,6 +448,8 @@ leftJoin cs left right
 {- | Hash-based left join kernel.
 Returns @(leftExpandedIndices, rightExpandedIndices)@ where
 right indices use @-1@ as sentinel for unmatched rows.
+Uses a dynamically growing output buffer to avoid pre-allocating the full
+cross-product size (which can be astronomically large for low-cardinality keys).
 -}
 hashLeftKernel ::
     VU.Vector Int -> VU.Vector Int -> (VU.Vector Int, VU.Vector Int)
@@ -408,49 +458,68 @@ hashLeftKernel leftHashes rightHashes = runST $ do
         ciIxs = ciSortedIndices ci
         ciOff = ciOffsets ci
         !leftN = VU.length leftHashes
+        !rightN = VU.length rightHashes
+        initCap = max 1 (min (leftN + rightN) 1_000_000)
 
-    -- Pass 1: count
-    let !totalRows =
-            VU.foldl'
-                ( \acc h ->
-                    case HM.lookup h ciOff of
-                        Nothing -> acc + 1 -- Unmatched left row still produces one output row
-                        Just (_, len) -> acc + len
-                )
-                0
-                leftHashes
-
-    -- Pass 2: fill
-    lv <- VUM.unsafeNew totalRows
-    rv <- VUM.unsafeNew totalRows
+    initLv <- VUM.unsafeNew initCap
+    initRv <- VUM.unsafeNew initCap
+    lvRef <- newSTRef initLv
+    rvRef <- newSTRef initRv
+    capRef <- newSTRef initCap
     posRef <- newSTRef (0 :: Int)
 
-    let go !i
+    let ensureCapacity needed = do
+            cap <- readSTRef capRef
+            when (needed > cap) $ do
+                let newCap = max needed (cap * 2)
+                    delta = newCap - cap
+                lv <- readSTRef lvRef
+                rv <- readSTRef rvRef
+                newLv <- VUM.unsafeGrow lv delta
+                newRv <- VUM.unsafeGrow rv delta
+                writeSTRef lvRef newLv
+                writeSTRef rvRef newRv
+                writeSTRef capRef newCap
+
+        go !i
             | i >= leftN = return ()
             | otherwise = do
                 let !h = leftHashes `VU.unsafeIndex` i
                 !p <- readSTRef posRef
                 case HM.lookup h ciOff of
                     Nothing -> do
+                        ensureCapacity (p + 1)
+                        lv <- readSTRef lvRef
+                        rv <- readSTRef rvRef
                         VUM.unsafeWrite lv p i
                         VUM.unsafeWrite rv p (-1)
                         writeSTRef posRef (p + 1)
                     Just (!start, !len) -> do
-                        fillBuild i start len p 0
+                        ensureCapacity (p + len)
+                        lv <- readSTRef lvRef
+                        rv <- readSTRef rvRef
+                        fillBuild i start len p 0 lv rv
                         writeSTRef posRef (p + len)
                 go (i + 1)
-        fillBuild !leftIdx !start !len !p !j
+        fillBuild !leftIdx !start !len !p !j !lv !rv
             | j >= len = return ()
             | otherwise = do
                 VUM.unsafeWrite lv (p + j) leftIdx
                 VUM.unsafeWrite rv (p + j) (ciIxs `VU.unsafeIndex` (start + j))
-                fillBuild leftIdx start len p (j + 1)
+                fillBuild leftIdx start len p (j + 1) lv rv
     go 0
 
-    (,) <$> VU.unsafeFreeze lv <*> VU.unsafeFreeze rv
+    !total <- readSTRef posRef
+    lv <- readSTRef lvRef
+    rv <- readSTRef rvRef
+    (,)
+        <$> VU.unsafeFreeze (VUM.slice 0 total lv)
+        <*> VU.unsafeFreeze (VUM.slice 0 total rv)
 
 {- | Sort-merge left join kernel.
 Returns @(leftExpandedIndices, rightExpandedIndices)@ with @-1@ sentinel.
+Uses a dynamically growing output buffer instead of a two-pass count-then-allocate
+strategy, which OOMs when low-cardinality keys produce large cross products.
 -}
 sortMergeLeftKernel ::
     VU.Vector Int -> VU.Vector Int -> (VU.Vector Int, VU.Vector Int)
@@ -459,53 +528,97 @@ sortMergeLeftKernel leftHashes rightHashes = runST $ do
         (rightSH, rightSI) = sortWithIndices rightHashes
         !leftN = VU.length leftHashes
         !rightN = VU.length rightHashes
+        initCap = max 1 (min (leftN + rightN) 1_000_000)
 
-    -- Pass 1: count
-    let countLoop !li !ri !c
-            | li >= leftN = c
-            | ri >= rightN = c + (leftN - li)
-            | lh < rh = countLoop (li + 1) ri (c + 1)
-            | lh > rh = countLoop li (ri + 1) c
-            | otherwise =
-                let !lEnd = findGroupEnd leftSH lh (li + 1) leftN
-                    !rEnd = findGroupEnd rightSH rh (ri + 1) rightN
-                 in countLoop lEnd rEnd (c + (lEnd - li) * (rEnd - ri))
-          where
-            !lh = leftSH `VU.unsafeIndex` li
-            !rh = rightSH `VU.unsafeIndex` ri
-        !totalRows = countLoop 0 0 0
+    initLv <- VUM.unsafeNew initCap
+    initRv <- VUM.unsafeNew initCap
+    lvRef <- newSTRef initLv
+    rvRef <- newSTRef initRv
+    capRef <- newSTRef initCap
+    posRef <- newSTRef (0 :: Int)
 
-    -- Pass 2: fill
-    lv <- VUM.unsafeNew totalRows
-    rv <- VUM.unsafeNew totalRows
+    let ensureCapacity needed = do
+            cap <- readSTRef capRef
+            when (needed > cap) $ do
+                let newCap = max needed (cap * 2)
+                    delta = newCap - cap
+                lv <- readSTRef lvRef
+                rv <- readSTRef rvRef
+                newLv <- VUM.unsafeGrow lv delta
+                newRv <- VUM.unsafeGrow rv delta
+                writeSTRef lvRef newLv
+                writeSTRef rvRef newRv
+                writeSTRef capRef newCap
 
-    let fill !li !ri !pos
+        fillGroup !li !lEnd !ri !rEnd = do
+            let !lLen = lEnd - li
+                !rLen = rEnd - ri
+                !groupSize = lLen * rLen
+            !p <- readSTRef posRef
+            ensureCapacity (p + groupSize)
+            lv <- readSTRef lvRef
+            rv <- readSTRef rvRef
+            let goL !lIdx !pos
+                    | lIdx >= lEnd = return ()
+                    | otherwise = do
+                        let !lOrig = leftSI `VU.unsafeIndex` lIdx
+                        goR lOrig ri pos
+                        goL (lIdx + 1) (pos + rLen)
+                goR !lOrig !rIdx !pos
+                    | rIdx >= rEnd = return ()
+                    | otherwise = do
+                        VUM.unsafeWrite lv pos lOrig
+                        VUM.unsafeWrite rv pos (rightSI `VU.unsafeIndex` rIdx)
+                        goR lOrig (rIdx + 1) (pos + 1)
+            goL li p
+            writeSTRef posRef (p + groupSize)
+
+        fill !li !ri
             | li >= leftN = return ()
-            | ri >= rightN = fillRemainingLeft li pos
+            | ri >= rightN = fillRemainingLeft li
             | lh < rh = do
-                VUM.unsafeWrite lv pos (leftSI `VU.unsafeIndex` li)
-                VUM.unsafeWrite rv pos (-1)
-                fill (li + 1) ri (pos + 1)
-            | lh > rh = fill li (ri + 1) pos
+                !p <- readSTRef posRef
+                ensureCapacity (p + 1)
+                lv <- readSTRef lvRef
+                rv <- readSTRef rvRef
+                VUM.unsafeWrite lv p (leftSI `VU.unsafeIndex` li)
+                VUM.unsafeWrite rv p (-1)
+                writeSTRef posRef (p + 1)
+                fill (li + 1) ri
+            | lh > rh = fill li (ri + 1)
             | otherwise = do
                 let !lEnd = findGroupEnd leftSH lh (li + 1) leftN
                     !rEnd = findGroupEnd rightSH rh (ri + 1) rightN
-                    !groupSize = (lEnd - li) * (rEnd - ri)
-                fillCrossProduct leftSI rightSI li lEnd ri rEnd lv rv pos
-                fill lEnd rEnd (pos + groupSize)
+                fillGroup li lEnd ri rEnd
+                fill lEnd rEnd
           where
             !lh = leftSH `VU.unsafeIndex` li
             !rh = rightSH `VU.unsafeIndex` ri
 
-        fillRemainingLeft !i !pos
-            | i >= leftN = return ()
-            | otherwise = do
-                VUM.unsafeWrite lv pos (leftSI `VU.unsafeIndex` i)
-                VUM.unsafeWrite rv pos (-1)
-                fillRemainingLeft (i + 1) (pos + 1)
+        fillRemainingLeft !i = do
+            let !remaining = leftN - i
+            when (remaining > 0) $ do
+                !p <- readSTRef posRef
+                ensureCapacity (p + remaining)
+                lv <- readSTRef lvRef
+                rv <- readSTRef rvRef
+                let go !j
+                        | j >= remaining = return ()
+                        | otherwise = do
+                            VUM.unsafeWrite lv (p + j) (leftSI `VU.unsafeIndex` (i + j))
+                            VUM.unsafeWrite rv (p + j) (-1)
+                            go (j + 1)
+                go 0
+                writeSTRef posRef (p + remaining)
 
-    fill 0 0 0
-    (,) <$> VU.unsafeFreeze lv <*> VU.unsafeFreeze rv
+    fill 0 0
+
+    !total <- readSTRef posRef
+    lv <- readSTRef lvRef
+    rv <- readSTRef rvRef
+    (,)
+        <$> VU.unsafeFreeze (VUM.slice 0 total lv)
+        <*> VU.unsafeFreeze (VUM.slice 0 total rv)
 
 {- | Assemble the result DataFrame for a left join.
 Right index vectors use @-1@ sentinel, gathered via 'gatherWithSentinel'.
