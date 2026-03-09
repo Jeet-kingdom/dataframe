@@ -1071,6 +1071,15 @@ writeColumn i value (MBoxedColumn (col :: VBM.IOVector a)) =
                     else VBM.unsafeWrite col i value >> return (Right True)
                 )
             Nothing -> return (Left value)
+writeColumn i value (MOptionalColumn (col :: VBM.IOVector (Maybe a))) =
+    let
+     in case testEquality (typeRep @a) (typeRep @T.Text) of
+            Just Refl ->
+                ( if isNullish value
+                    then VBM.unsafeWrite col i Nothing >> return (Left $! value)
+                    else VBM.unsafeWrite col i (Just value) >> return (Right True)
+                )
+            Nothing -> return (Left value)
 writeColumn i value (MUnboxedColumn (col :: VUM.IOVector a)) =
     case testEquality (typeRep @a) (typeRep @Int) of
         Just Refl -> case readInt value of
@@ -1084,6 +1093,7 @@ writeColumn i value (MUnboxedColumn (col :: VUM.IOVector a)) =
 {-# INLINE writeColumn #-}
 
 freezeColumn' :: [(Int, T.Text)] -> MutableColumn -> IO Column
+freezeColumn' nulls (MOptionalColumn col) = OptionalColumn <$> VB.unsafeFreeze col
 freezeColumn' nulls (MBoxedColumn col)
     | null nulls = BoxedColumn <$> VB.unsafeFreeze col
     | all (isNullish . snd) nulls =

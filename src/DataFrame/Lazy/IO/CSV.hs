@@ -343,6 +343,14 @@ writeColumnBs i bs (MBoxedColumn (col :: VM.IOVector a)) =
                     then VM.unsafeWrite col i T.empty >> return (Left val)
                     else VM.unsafeWrite col i val >> return (Right True)
         Nothing -> return (Left (TextEncoding.decodeUtf8Lenient bs))
+writeColumnBs i bs (MOptionalColumn (col :: VM.IOVector (Maybe a))) =
+    case testEquality (typeRep @a) (typeRep @T.Text) of
+        Just Refl ->
+            let val = TextEncoding.decodeUtf8Lenient bs
+             in if isNullish val
+                    then VM.unsafeWrite col i Nothing >> return (Left val)
+                    else VM.unsafeWrite col i (Just val) >> return (Right True)
+        Nothing -> return (Left (TextEncoding.decodeUtf8Lenient bs))
 writeColumnBs i bs (MUnboxedColumn (col :: VUM.IOVector a)) =
     case testEquality (typeRep @a) (typeRep @Double) of
         Just Refl -> case readByteStringDouble bs of
@@ -413,6 +421,7 @@ makeCol n (SType (_ :: P.Proxy a)) =
 sliceCol :: Int -> MutableColumn -> MutableColumn
 sliceCol n (MBoxedColumn col) = MBoxedColumn (VM.take n col)
 sliceCol n (MUnboxedColumn col) = MUnboxedColumn (VUM.take n col)
+sliceCol n (MOptionalColumn col) = MOptionalColumn (VM.take n col)
 
 {- | Finds the index of the next unquoted newline (0x0A).
 Fast path: uses memchr (SIMD) and falls back to a quote-aware linear scan
