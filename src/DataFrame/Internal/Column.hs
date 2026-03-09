@@ -53,6 +53,7 @@ data Column where
 data MutableColumn where
     MBoxedColumn :: (Columnable a) => VBM.IOVector a -> MutableColumn
     MUnboxedColumn :: (Columnable a, VU.Unbox a) => VUM.IOVector a -> MutableColumn
+    MOptionalColumn :: (Columnable a) => VBM.IOVector (Maybe a) -> MutableColumn
 
 {- | A TypedColumn is a wrapper around our type-erased column.
 It is used to type check expressions on columns.
@@ -1274,6 +1275,38 @@ concatColumnsEither (UnboxedColumn (left :: VU.Vector a)) (OptionalColumn (right
         Just Refl -> OptionalColumn $ fmap Just (VG.convert left) <> right
         Nothing ->
             OptionalColumn $ fmap (Just . Left) (VG.convert left) <> fmap (fmap Right) right
+
+-- | Allocate a mutable column of size @n@ matching the constructor/type of the given column.
+newMutableColumn :: Int -> Column -> IO MutableColumn
+newMutableColumn n (OptionalColumn (_ :: VB.Vector (Maybe a))) =
+    MOptionalColumn <$> (VBM.new n :: IO (VBM.IOVector (Maybe a)))
+newMutableColumn n (BoxedColumn (_ :: VB.Vector a)) =
+    MBoxedColumn <$> (VBM.new n :: IO (VBM.IOVector a))
+newMutableColumn n (UnboxedColumn (_ :: VU.Vector a)) =
+    MUnboxedColumn <$> (VUM.new n :: IO (VUM.IOVector a))
+
+-- | Copy a column chunk into a mutable column starting at offset @off@.
+copyIntoMutableColumn :: MutableColumn -> Int -> Column -> IO ()
+copyIntoMutableColumn (MOptionalColumn (mv :: VBM.IOVector (Maybe b))) off (OptionalColumn (v :: VB.Vector (Maybe a))) =
+    case testEquality (typeRep @a) (typeRep @b) of
+        Just Refl -> VG.imapM_ (\i x -> VBM.unsafeWrite mv (off + i) x) v
+        Nothing -> error "copyIntoMutableColumn: Optional type mismatch"
+copyIntoMutableColumn (MBoxedColumn (mv :: VBM.IOVector b)) off (BoxedColumn (v :: VB.Vector a)) =
+    case testEquality (typeRep @a) (typeRep @b) of
+        Just Refl -> VG.imapM_ (\i x -> VBM.unsafeWrite mv (off + i) x) v
+        Nothing -> error "copyIntoMutableColumn: Boxed type mismatch"
+copyIntoMutableColumn (MUnboxedColumn (mv :: VUM.IOVector b)) off (UnboxedColumn (v :: VU.Vector a)) =
+    case testEquality (typeRep @a) (typeRep @b) of
+        Just Refl -> VG.imapM_ (\i x -> VUM.unsafeWrite mv (off + i) x) v
+        Nothing -> error "copyIntoMutableColumn: Unboxed type mismatch"
+copyIntoMutableColumn _ _ _ =
+    error "copyIntoMutableColumn: constructor mismatch"
+
+-- | Freeze a mutable column into an immutable column.
+freezeMutableColumn :: MutableColumn -> IO Column
+freezeMutableColumn (MOptionalColumn mv) = OptionalColumn <$> VB.unsafeFreeze mv
+freezeMutableColumn (MBoxedColumn mv) = BoxedColumn <$> VB.unsafeFreeze mv
+freezeMutableColumn (MUnboxedColumn mv) = UnboxedColumn <$> VU.unsafeFreeze mv
 
 {- | O(n) Converts a column to a list. Throws an exception if the wrong type is specified.
 

@@ -157,7 +157,9 @@ readParquetWithOpts opts path = do
                         )
                     )
 
-    colMap <- newIORef (M.empty :: M.Map T.Text DI.Column)
+    let totalRows = sum (map (fromIntegral . rowGroupNumRows) (rowGroups fileMetadata)) :: Int
+    colMutMap <- newIORef (M.empty :: M.Map T.Text DI.MutableColumn)
+    colOffMap <- newIORef (M.empty :: M.Map T.Text Int)
     lTypeMap <- newIORef (M.empty :: M.Map T.Text LogicalType)
 
     let schemaElements = schema fileMetadata
@@ -226,10 +228,22 @@ readParquetWithOpts opts path = do
                         maybeTypeLength
                         lType
 
-                modifyIORef colMap (M.insertWith DI.concatColumnsEither colFullName column)
+                mutMapSnap <- readIORef colMutMap
+                case M.lookup colFullName mutMapSnap of
+                    Nothing -> do
+                        mc <- DI.newMutableColumn totalRows column
+                        DI.copyIntoMutableColumn mc 0 column
+                        modifyIORef colMutMap (M.insert colFullName mc)
+                        modifyIORef colOffMap (M.insert colFullName (DI.columnLength column))
+                    Just mc -> do
+                        off <- (M.! colFullName) <$> readIORef colOffMap
+                        DI.copyIntoMutableColumn mc off column
+                        modifyIORef colOffMap (M.adjust (+ DI.columnLength column) colFullName)
                 modifyIORef lTypeMap (M.insert colFullName lType)
 
-    finalColMap <- readIORef colMap
+    finalMutMap <- readIORef colMutMap
+    finalColMap <-
+        M.traverseWithKey (\_ mc -> DI.freezeMutableColumn mc) finalMutMap
     finalLTypeMap <- readIORef lTypeMap
     let orderedColumns =
             map
