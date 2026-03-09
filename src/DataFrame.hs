@@ -366,5 +366,5 @@ import DataFrame.Operations.Subset as Subset (
     takeLast,
  )
 import DataFrame.Operations.Transformations as Transformations
-import DataFrame.Operators as Operators
 import DataFrame.Operations.Typing as Typing
+import DataFrame.Operators as Operators
