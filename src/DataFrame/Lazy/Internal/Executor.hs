@@ -4,6 +4,7 @@
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 
 {- | Pull-based (iterator) execution engine.
@@ -18,6 +19,7 @@ module DataFrame.Lazy.Internal.Executor (
     ExecutorConfig (..),
     defaultExecutorConfig,
     execute,
+    foldBatches,
 ) where
 
 import Control.Concurrent (forkIO)
@@ -29,8 +31,10 @@ import Control.Monad (filterM, when)
 import qualified Data.ByteString as BS
 import Data.IORef
 import qualified Data.Map as M
+import qualified Data.Set as S
 import qualified Data.Text as T
 import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
+import qualified Data.Vector.Unboxed as VU
 import qualified DataFrame.IO.Parquet as Parquet
 import qualified DataFrame.Internal.Column as C
 import qualified DataFrame.Internal.DataFrame as D
@@ -100,6 +104,22 @@ collectStream stream = go D.empty
 -}
 execute :: PhysicalPlan -> ExecutorConfig -> IO D.DataFrame
 execute plan cfg = buildStream plan cfg >>= collectStream
+
+{- | Fold a function over every batch produced by a physical plan.
+The fold is strict in the accumulator; each batch is discarded after folding.
+-}
+foldBatches ::
+    (b -> D.DataFrame -> IO b) -> b -> PhysicalPlan -> ExecutorConfig -> IO b
+foldBatches f seed plan cfg = do
+    stream <- buildStream plan cfg
+    let loop !acc = do
+            mb <- pullBatch stream
+            case mb of
+                Nothing -> return acc
+                Just batch -> do
+                    !acc' <- f acc batch
+                    loop acc'
+    loop seed
 
 -- ---------------------------------------------------------------------------
 -- Per-operator stream builders
@@ -219,18 +239,73 @@ buildStream (PhysicalHashAggregate keys aggs child) execCfg = do
                 mb <- readIORef ref
                 writeIORef ref Nothing
                 return mb
--- HashJoin (blocking on both sides) ------------------------------------------
-buildStream (PhysicalHashJoin jt leftKey rightKey leftPlan rightPlan) execCfg = do
-    leftDf <- execute leftPlan execCfg
-    rightDf <- execute rightPlan execCfg
-    let result = performJoin jt leftKey rightKey leftDf rightDf
-    ref <- newIORef (Just result)
-    return . Stream $
-        ( do
-            mb <- readIORef ref
-            writeIORef ref Nothing
-            return mb
-        )
+-- SourceDF (split pre-loaded DataFrame into batches) -------------------------
+buildStream (PhysicalSourceDF df) execCfg = do
+    let bs = defaultBatchSize execCfg
+        total = Core.nRows df
+    posRef <- newIORef (0 :: Int)
+    return . Stream $ do
+        i <- readIORef posRef
+        if i >= total
+            then return Nothing
+            else do
+                let n = min bs (total - i)
+                    batch = Sub.range (i, i + n) df
+                writeIORef posRef (i + n)
+                return (Just batch)
+-- HashJoin — streaming probe (INNER/LEFT) or blocking fallback ----------------
+buildStream (PhysicalHashJoin jt leftKey rightKey leftPlan rightPlan) execCfg =
+    case jt of
+        Join.INNER -> streamingHashJoin assembleInnerBatch
+        Join.LEFT -> streamingHashJoin assembleLeftBatch
+        _ -> do
+            -- Blocking fallback for RIGHT / FULL_OUTER
+            leftDf <- execute leftPlan execCfg
+            rightDf <- execute rightPlan execCfg
+            let result = performJoin jt leftKey rightKey leftDf rightDf
+            ref <- newIORef (Just result)
+            return . Stream $ do
+                mb <- readIORef ref
+                writeIORef ref Nothing
+                return mb
+  where
+    streamingHashJoin assembleFn = do
+        -- Materialise build (right) side once and build the compact index.
+        rightDf <- execute rightPlan execCfg
+        let rightDf' =
+                if leftKey == rightKey
+                    then rightDf
+                    else Core.rename rightKey leftKey rightDf
+            joinKey = leftKey
+            csSet = S.fromList [joinKey]
+            rightHashes = Join.buildHashColumn [joinKey] rightDf'
+            ci = Join.buildCompactIndex rightHashes
+        -- Stream probe (left) side batch by batch.
+        leftStream <- buildStream leftPlan execCfg
+        return . Stream $ do
+            mBatch <- pullBatch leftStream
+            case mBatch of
+                Nothing -> return Nothing
+                Just probeBatch -> do
+                    let probeHashes = Join.buildHashColumn [joinKey] probeBatch
+                        (probeIxs, buildIxs) = Join.hashProbeKernel ci probeHashes
+                    return . Just $ assembleFn csSet probeBatch rightDf' probeIxs buildIxs
+
+    assembleLeftBatch csSet probeBatch rightDf' probeIxs buildIxs =
+        let batchN = Core.nRows probeBatch
+            -- Mark which probe rows were matched (may have duplicates — that's fine).
+            matched =
+                VU.accumulate
+                    (\_ b -> b)
+                    (VU.replicate batchN False)
+                    (VU.map (,True) probeIxs)
+            unmatchedIxs = VU.findIndices not matched
+            allProbeIxs = probeIxs VU.++ unmatchedIxs
+            allBuildIxs = buildIxs VU.++ VU.replicate (VU.length unmatchedIxs) (-1)
+         in Join.assembleLeft csSet probeBatch rightDf' allProbeIxs allBuildIxs
+
+    assembleInnerBatch = Join.assembleInner
+
 -- SortMergeJoin (blocking on both sides) -------------------------------------
 buildStream (PhysicalSortMergeJoin jt leftKey rightKey leftPlan rightPlan) execCfg = do
     leftDf <- execute leftPlan execCfg

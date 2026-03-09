@@ -358,9 +358,17 @@ atIndices indexes (UnboxedColumn column) = UnboxedColumn $ VU.ifilter (\i _ -> i
 
 -- | O(n) Selects the elements at a given set of indices. Does not change the order.
 atIndicesStable :: VU.Vector Int -> Column -> Column
-atIndicesStable indexes (BoxedColumn column) = BoxedColumn $ VG.unsafeBackpermute column (VG.convert indexes)
+atIndicesStable indexes (BoxedColumn column) =
+    BoxedColumn $
+        VB.generate
+            (VU.length indexes)
+            (\i -> column `VB.unsafeIndex` (indexes `VU.unsafeIndex` i))
 atIndicesStable indexes (UnboxedColumn column) = UnboxedColumn $ VU.unsafeBackpermute column indexes
-atIndicesStable indexes (OptionalColumn column) = OptionalColumn $ VG.unsafeBackpermute column (VG.convert indexes)
+atIndicesStable indexes (OptionalColumn column) =
+    OptionalColumn $
+        VB.generate
+            (VU.length indexes)
+            (\i -> column `VB.unsafeIndex` (indexes `VU.unsafeIndex` i))
 {-# INLINE atIndicesStable #-}
 
 {- | Like 'atIndicesStable' but treats negative indices as null,

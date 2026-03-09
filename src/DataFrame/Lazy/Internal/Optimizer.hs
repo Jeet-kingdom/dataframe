@@ -117,6 +117,7 @@ referencedCols (Aggregate keys aggs child) =
 referencedCols (Sort cols child) =
     fmap (S.union (S.fromList (fmap fst cols))) (referencedCols child)
 referencedCols (Limit _ child) = referencedCols child
+referencedCols (SourceDF _) = Nothing
 
 liftMaybe2 :: (a -> b -> c) -> Maybe a -> Maybe b -> Maybe c
 liftMaybe2 f (Just a) (Just b) = Just (f a b)
@@ -157,6 +158,7 @@ eliminateDeadColumns plan = go (referencedCols plan) plan
             Nothing -> Scan ds schema
             Just cols ->
                 Scan ds (Schema (M.filterWithKey (\k _ -> k `S.member` cols) (elements schema)))
+    go _ (SourceDF df) = SourceDF df
 
 -- ---------------------------------------------------------------------------
 -- Logical → Physical lowering
@@ -204,3 +206,4 @@ toPhysical batchSz (Sort cols child) =
     PhysicalSort cols (toPhysical batchSz child)
 toPhysical batchSz (Limit n child) =
     PhysicalLimit n (toPhysical batchSz child)
+toPhysical _ (SourceDF df) = PhysicalSourceDF df

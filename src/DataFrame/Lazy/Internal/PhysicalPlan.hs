@@ -1,6 +1,7 @@
 module DataFrame.Lazy.Internal.PhysicalPlan where
 
 import qualified Data.Text as T
+import qualified DataFrame.Internal.DataFrame as D
 import qualified DataFrame.Internal.Expression as E
 import DataFrame.Internal.Schema (Schema)
 import DataFrame.Lazy.Internal.LogicalPlan (DataSource, SortOrder)
@@ -30,4 +31,6 @@ data PhysicalPlan
     | PhysicalLimit Int PhysicalPlan
     | -- | Materialize child to a binary file on disk (used for build sides).
       PhysicalSpill PhysicalPlan FilePath
+    | -- | Emit an already-loaded DataFrame as a stream of batches.
+      PhysicalSourceDF D.DataFrame
     deriving (Show)

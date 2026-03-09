@@ -3,6 +3,7 @@
 module DataFrame.Lazy.Internal.LogicalPlan where
 
 import qualified Data.Text as T
+import qualified DataFrame.Internal.DataFrame as D
 import qualified DataFrame.Internal.Expression as E
 import DataFrame.Internal.Schema (Schema)
 import DataFrame.Operations.Join (JoinType)
@@ -38,4 +39,6 @@ data LogicalPlan
       Sort [(T.Text, SortOrder)] LogicalPlan
     | -- | Retain at most N rows.
       Limit Int LogicalPlan
+    | -- | Lift an already-loaded DataFrame into the lazy plan.
+      SourceDF D.DataFrame
     deriving (Show)

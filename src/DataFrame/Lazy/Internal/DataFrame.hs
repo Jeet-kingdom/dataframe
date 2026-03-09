@@ -3,6 +3,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module DataFrame.Lazy.Internal.DataFrame where
 
@@ -54,6 +55,10 @@ runDataFrame ldf = do
 -- ---------------------------------------------------------------------------
 -- Builders that construct the logical plan tree
 -- ---------------------------------------------------------------------------
+
+-- | Lift an already-loaded eager 'D.DataFrame' into the lazy plan.
+fromDataFrame :: D.DataFrame -> LazyDataFrame
+fromDataFrame df = LazyDataFrame{plan = SourceDF df, batchSize = 1_000_000}
 
 -- | Scan a CSV file with the default comma separator.
 scanCsv :: Schema -> T.Text -> LazyDataFrame
