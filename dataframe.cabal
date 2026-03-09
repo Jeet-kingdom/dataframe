@@ -196,7 +196,7 @@ executable lazy-bench
                       time >= 1.12 && < 2,
     hs-source-dirs:   app
     default-language: Haskell2010
-    ghc-options: -rtsopts -threaded -with-rtsopts=-N -O2
+    ghc-options: -rtsopts -threaded -with-rtsopts=-N
 
 benchmark dataframe-benchmark
     import: warnings
