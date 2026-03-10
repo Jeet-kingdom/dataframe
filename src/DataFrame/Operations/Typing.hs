@@ -6,6 +6,7 @@
 
 module DataFrame.Operations.Typing where
 
+import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.Vector as V
 
@@ -14,9 +15,10 @@ import qualified Data.Proxy as P
 import Data.Time
 import Data.Type.Equality (TestEquality (..), type (:~:) (Refl))
 import DataFrame.Internal.Column (Column (..), fromVector)
-import DataFrame.Internal.DataFrame (DataFrame (..))
+import DataFrame.Internal.DataFrame (DataFrame (..), unsafeGetColumn)
 import DataFrame.Internal.Parsing
 import DataFrame.Internal.Schema
+import DataFrame.Operations.Core
 import Text.Read
 import Type.Reflection (typeRep)
 
@@ -219,19 +221,25 @@ data ParsingAssumption
     | NoAssumption
     | TextAssumption
 
-parseWithTypes :: [SchemaType] -> DataFrame -> DataFrame
-parseWithTypes ts df = df{columns = go 0 ts (columns df)}
+parseWithTypes :: Bool -> M.Map T.Text SchemaType -> DataFrame -> DataFrame
+parseWithTypes safe ts df
+    | M.null ts = df
+    | otherwise =
+        M.foldrWithKey
+            (\k v d -> insertColumn k (asType v (unsafeGetColumn k d)) d)
+            df
+            ts
   where
-    go :: Int -> [SchemaType] -> V.Vector Column -> V.Vector Column
-    go n [] xs = xs
-    go n (t : rest) xs
-        | n >= V.length xs = xs
-        | otherwise =
-            go (n + 1) rest (V.update xs (V.fromList [(n, asType t (xs V.! n))]))
     asType :: SchemaType -> Column -> Column
     asType (SType (_ :: P.Proxy a)) c@(BoxedColumn (col :: V.Vector b)) = case testEquality (typeRep @a) (typeRep @b) of
         Just Refl -> c
         Nothing -> case testEquality (typeRep @T.Text) (typeRep @b) of
-            Just Refl -> fromVector (V.map ((readMaybe @a) . T.unpack) col)
-            Nothing -> fromVector (V.map ((readMaybe @a) . show) col)
+            Just Refl ->
+                if safe
+                    then fromVector (V.map ((readMaybe @a) . T.unpack) col)
+                    else fromVector (V.map ((read @a) . T.unpack) col)
+            Nothing ->
+                if safe
+                    then fromVector (V.map ((readMaybe @a) . show) col)
+                    else fromVector (V.map ((read @a) . show) col)
     asType _ c = c

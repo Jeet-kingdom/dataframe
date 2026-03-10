@@ -310,12 +310,13 @@ decodeSeparated !opts csvData = do
     frozenCols <- V.mapM (finalizeBuilderColumn opts) builderColsV
     let numRows = maybe 0 columnLength (frozenCols V.!? 0)
 
-    return $
-        DataFrame
-            frozenCols
-            (M.fromList (zip columnNames [0 ..]))
-            (numRows, V.length frozenCols)
-            M.empty -- TODO give typed column references
+    let df =
+            DataFrame
+                frozenCols
+                (M.fromList (zip columnNames [0 ..]))
+                (numRows, V.length frozenCols)
+                M.empty -- TODO give typed column references
+    pure $ parseWithTypes (safeRead opts) (schemaTypeMap (typeSpec opts)) df
 
 initializeColumns ::
     [T.Text] -> [BL.ByteString] -> ReadOptions -> IO [BuilderColumn]
@@ -325,7 +326,7 @@ initializeColumns names row opts = zipWithM initColumn names (map lookupType nam
     -- Return Nothing for columns that should be inferred from BS
     shouldInfer = case typeSpec opts of
         InferFromSample _ -> True
-        SpecifyTypes _ -> True
+        SpecifyTypes _ -> False
         NoInference -> False
     lookupType name = M.lookup name typeMap
     initColumn :: T.Text -> Maybe SchemaType -> IO BuilderColumn
