@@ -221,7 +221,7 @@ defaultReadOptions =
         , dateFormat = "%Y-%m-%d"
         , columnSeparator = ','
         , numColumns = Nothing
-        , missingIndicators = []
+        , missingIndicators = ["Nothing", "NULL", "", " ", "nan", "null", "N/A", "NaN", "NAN", "NA"]
         }
 
 {- | Read CSV file from path and load it into a dataframe.
@@ -371,12 +371,12 @@ processRow missing !vals !cols = V.zipWithM_ processValue vals cols
                 Nothing -> appendPagedUnboxedVector gv 0.0 >> appendPagedUnboxedVector valid 0
             BuilderText gv valid -> do
                 let !val = T.strip (TE.decodeUtf8Lenient bs')
-                if isNullish val || val `elem` missing
+                if val `elem` missing
                     then appendPagedVector gv T.empty >> appendPagedUnboxedVector valid 0
                     else appendPagedVector gv val >> appendPagedUnboxedVector valid 1
             BuilderBS gv valid -> do
                 let !bs'' = C.strip bs'
-                if isNullishBS bs'' || TE.decodeUtf8Lenient bs'' `elem` missing
+                if TE.decodeUtf8Lenient bs'' `elem` missing
                     then appendPagedVector gv BS.empty >> appendPagedUnboxedVector valid 0
                     else appendPagedVector gv bs'' >> appendPagedUnboxedVector valid 1
 

@@ -339,17 +339,13 @@ writeColumnBs i bs (MBoxedColumn (col :: VM.IOVector a)) =
     case testEquality (typeRep @a) (typeRep @T.Text) of
         Just Refl ->
             let val = TextEncoding.decodeUtf8Lenient bs
-             in if isNullish val
-                    then VM.unsafeWrite col i T.empty >> return (Left val)
-                    else VM.unsafeWrite col i val >> return (Right True)
+             in VM.unsafeWrite col i val >> return (Right True)
         Nothing -> return (Left (TextEncoding.decodeUtf8Lenient bs))
 writeColumnBs i bs (MOptionalColumn (col :: VM.IOVector (Maybe a))) =
     case testEquality (typeRep @a) (typeRep @T.Text) of
         Just Refl ->
             let val = TextEncoding.decodeUtf8Lenient bs
-             in if isNullish val
-                    then VM.unsafeWrite col i Nothing >> return (Left val)
-                    else VM.unsafeWrite col i (Just val) >> return (Right True)
+             in VM.unsafeWrite col i (Just val) >> return (Right True)
         Nothing -> return (Left (TextEncoding.decodeUtf8Lenient bs))
 writeColumnBs i bs (MUnboxedColumn (col :: VUM.IOVector a)) =
     case testEquality (typeRep @a) (typeRep @Double) of

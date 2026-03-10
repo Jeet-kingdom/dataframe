@@ -10,6 +10,8 @@ import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.Vector as V
 
+import Control.Applicative (asum)
+import Control.Monad (join)
 import Data.Maybe (fromMaybe)
 import qualified Data.Proxy as P
 import Data.Time
@@ -20,7 +22,7 @@ import DataFrame.Internal.Parsing
 import DataFrame.Internal.Schema
 import DataFrame.Operations.Core
 import Text.Read
-import Type.Reflection (typeRep)
+import Type.Reflection
 
 type DateFormat = String
 
@@ -231,15 +233,53 @@ parseWithTypes safe ts df
             ts
   where
     asType :: SchemaType -> Column -> Column
-    asType (SType (_ :: P.Proxy a)) c@(BoxedColumn (col :: V.Vector b)) = case testEquality (typeRep @a) (typeRep @b) of
-        Just Refl -> c
-        Nothing -> case testEquality (typeRep @T.Text) (typeRep @b) of
-            Just Refl ->
-                if safe
-                    then fromVector (V.map ((readMaybe @a) . T.unpack) col)
-                    else fromVector (V.map ((read @a) . T.unpack) col)
-            Nothing ->
-                if safe
-                    then fromVector (V.map ((readMaybe @a) . show) col)
-                    else fromVector (V.map ((read @a) . show) col)
+    asType (SType (_ :: P.Proxy a)) c@(BoxedColumn (col :: V.Vector b)) = case typeRep @a of
+        App t1 t2 -> case eqTypeRep t1 (typeRep @Maybe) of
+            Just HRefl -> case testEquality (typeRep @a) (typeRep @b) of
+                Just Refl -> c
+                Nothing -> case testEquality (typeRep @T.Text) (typeRep @b) of
+                    Just Refl -> fromVector (V.map (join . (readAsMaybe @a) . T.unpack) col)
+                    Nothing -> fromVector (V.map (join . (readAsMaybe @a) . show) col)
+            Nothing -> case t1 of
+                App t1' t2' -> case eqTypeRep t1' (typeRep @Either) of
+                    Just HRefl -> case testEquality (typeRep @a) (typeRep @b) of
+                        Just Refl -> c
+                        Nothing -> case testEquality (typeRep @T.Text) (typeRep @b) of
+                            Just Refl -> fromVector (V.map ((readAsEither @a) . T.unpack) col)
+                            Nothing -> fromVector (V.map ((readAsEither @a) . show) col)
+                    Nothing -> case testEquality (typeRep @a) (typeRep @b) of
+                        Just Refl -> c
+                        Nothing -> case testEquality (typeRep @T.Text) (typeRep @b) of
+                            Just Refl ->
+                                if safe
+                                    then fromVector (V.map ((readMaybe @a) . T.unpack) col)
+                                    else fromVector (V.map ((read @a) . T.unpack) col)
+                            Nothing ->
+                                if safe
+                                    then fromVector (V.map ((readMaybe @a) . show) col)
+                                    else fromVector (V.map ((read @a) . show) col)
+                _ -> c
+        _ -> case testEquality (typeRep @a) (typeRep @b) of
+            Just Refl -> c
+            Nothing -> case testEquality (typeRep @T.Text) (typeRep @b) of
+                Just Refl ->
+                    if safe
+                        then fromVector (V.map ((readMaybe @a) . T.unpack) col)
+                        else fromVector (V.map ((read @a) . T.unpack) col)
+                Nothing ->
+                    if safe
+                        then fromVector (V.map ((readMaybe @a) . show) col)
+                        else fromVector (V.map ((read @a) . show) col)
     asType _ c = c
+
+readAsMaybe :: (Read a) => String -> Maybe a
+readAsMaybe s
+    | null s = Nothing
+    | otherwise = readMaybe $ "Just " <> s
+
+readAsEither :: (Read a) => String -> a
+readAsEither v = case asum [readMaybe $ "Left " <> s, readMaybe $ "Right " <> s] of
+    Nothing -> error $ "Couldn't read value: " <> s
+    Just v -> v
+  where
+    s = if null v then "\"\"" else v
