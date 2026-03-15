@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -53,14 +54,30 @@ module DataFrame.Typed.Expr (
     -- * Unary / binary lifting
     lift,
     lift2,
+    nullLift,
+    nullLift2,
 
-    -- * Comparison operators
+    -- * Same-type comparison operators
     (.==.),
     (./=.),
     (.<.),
     (.<=.),
     (.>=.),
     (.>.),
+
+    -- * Nullable-aware arithmetic operators
+    (.+),
+    (.-),
+    (.*),
+    (./),
+
+    -- * Nullable-aware comparison operators (three-valued logic)
+    (.==),
+    (./=),
+    (.<),
+    (.<=),
+    (.>=),
+    (.>),
 
     -- * Logical operators
     (.&&.),
@@ -97,6 +114,16 @@ import DataFrame.Internal.Expression (
     NamedExpr,
     UExpr (..),
     UnaryOp (..),
+ )
+import DataFrame.Internal.Nullable (
+    BaseType,
+    NullCmpResult,
+    NullLift1Op (applyNull1),
+    NullLift1Result,
+    NullLift2Op (applyNull2),
+    NullLift2Result,
+    NullableArithOp (nullArithOp),
+    NullableCmpOp (nullCmpOp),
  )
 
 import DataFrame.Typed.Schema (AssertPresent, Lookup)
@@ -189,6 +216,29 @@ lift2 ::
     (a -> b -> c) -> TExpr cols a -> TExpr cols b -> TExpr cols c
 lift2 f (TExpr a) (TExpr b) = TExpr (Binary (MkBinaryOp f "binaryUdf" Nothing False 0) a b)
 
+{- | Typed 'nullLift': lift a unary function with nullable propagation.
+When the input is @Maybe a@, 'Nothing' short-circuits; when plain @a@, applies directly.
+The return type is inferred via 'NullLift1Result': no annotation needed.
+-}
+nullLift ::
+    (NullLift1Op a r (NullLift1Result a r), Columnable (NullLift1Result a r)) =>
+    (BaseType a -> r) ->
+    TExpr cols a ->
+    TExpr cols (NullLift1Result a r)
+nullLift f (TExpr e) = TExpr (Unary (MkUnaryOp (applyNull1 f) "nullLift" Nothing) e)
+
+{- | Typed 'nullLift2': lift a binary function with nullable propagation.
+Any 'Nothing' operand short-circuits to 'Nothing' in the result.
+The return type is inferred via 'NullLift2Result': no annotation needed.
+-}
+nullLift2 ::
+    (NullLift2Op a b r (NullLift2Result a b r), Columnable (NullLift2Result a b r)) =>
+    (BaseType a -> BaseType b -> r) ->
+    TExpr cols a ->
+    TExpr cols b ->
+    TExpr cols (NullLift2Result a b r)
+nullLift2 f (TExpr a) (TExpr b) = TExpr (Binary (MkBinaryOp (applyNull2 f) "nullLift2" Nothing False 0) a b)
+
 infixl 4 .==., ./=., .<., .<=., .>=., .>.
 infixr 3 .&&.
 infixr 2 .||.
@@ -222,6 +272,110 @@ infixr 2 .||.
 
 (.||.) :: TExpr cols Bool -> TExpr cols Bool -> TExpr cols Bool
 (.||.) (TExpr a) (TExpr b) = TExpr (Binary (MkBinaryOp (||) "or" (Just "||") True 2) a b)
+
+-------------------------------------------------------------------------------
+-- Nullable-aware arithmetic operators
+-------------------------------------------------------------------------------
+
+infixl 6 .+, .-
+infixl 7 .*, ./
+infix 4 .==, ./=, .<, .<=, .>=, .>
+
+{- | Nullable-aware addition. Works for all combinations of nullable\/non-nullable operands.
+@col \@\"x\" '.+' col \@\"y\"  -- :: TExpr cols (Maybe Int)  when y :: Maybe Int@
+-}
+(.+) ::
+    (NullableArithOp a b c, Num (BaseType a)) =>
+    TExpr cols a ->
+    TExpr cols b ->
+    TExpr cols c
+(.+) (TExpr a) (TExpr b) =
+    TExpr (Binary (MkBinaryOp (nullArithOp (+)) "nulladd" (Just "+") True 6) a b)
+
+-- | Nullable-aware subtraction.
+(.-) ::
+    (NullableArithOp a b c, Num (BaseType a)) =>
+    TExpr cols a ->
+    TExpr cols b ->
+    TExpr cols c
+(.-) (TExpr a) (TExpr b) =
+    TExpr (Binary (MkBinaryOp (nullArithOp (-)) "nullsub" (Just "-") False 6) a b)
+
+-- | Nullable-aware multiplication.
+(.*) ::
+    (NullableArithOp a b c, Num (BaseType a)) =>
+    TExpr cols a ->
+    TExpr cols b ->
+    TExpr cols c
+(.*) (TExpr a) (TExpr b) =
+    TExpr (Binary (MkBinaryOp (nullArithOp (*)) "nullmul" (Just "*") True 7) a b)
+
+-- | Nullable-aware division.
+(./) ::
+    (NullableArithOp a b c, Fractional (BaseType a)) =>
+    TExpr cols a ->
+    TExpr cols b ->
+    TExpr cols c
+(./) (TExpr a) (TExpr b) =
+    TExpr (Binary (MkBinaryOp (nullArithOp (/)) "nulldiv" (Just "/") False 7) a b)
+
+-------------------------------------------------------------------------------
+-- Nullable-aware comparison operators (three-valued logic)
+-------------------------------------------------------------------------------
+
+-- | Nullable-aware equality. Returns @Maybe Bool@ when either operand is nullable.
+(.==) ::
+    (NullableCmpOp a b (NullCmpResult a b), Eq (BaseType a)) =>
+    TExpr cols a ->
+    TExpr cols b ->
+    TExpr cols (NullCmpResult a b)
+(.==) (TExpr a) (TExpr b) =
+    TExpr (Binary (MkBinaryOp (nullCmpOp (==)) "eq" (Just "==") True 4) a b)
+
+-- | Nullable-aware inequality.
+(./=) ::
+    (NullableCmpOp a b (NullCmpResult a b), Eq (BaseType a)) =>
+    TExpr cols a ->
+    TExpr cols b ->
+    TExpr cols (NullCmpResult a b)
+(./=) (TExpr a) (TExpr b) =
+    TExpr (Binary (MkBinaryOp (nullCmpOp (/=)) "neq" (Just "/=") True 4) a b)
+
+-- | Nullable-aware less-than.
+(.<) ::
+    (NullableCmpOp a b (NullCmpResult a b), Ord (BaseType a)) =>
+    TExpr cols a ->
+    TExpr cols b ->
+    TExpr cols (NullCmpResult a b)
+(.<) (TExpr a) (TExpr b) =
+    TExpr (Binary (MkBinaryOp (nullCmpOp (<)) "lt" (Just "<") False 4) a b)
+
+-- | Nullable-aware less-than-or-equal.
+(.<=) ::
+    (NullableCmpOp a b (NullCmpResult a b), Ord (BaseType a)) =>
+    TExpr cols a ->
+    TExpr cols b ->
+    TExpr cols (NullCmpResult a b)
+(.<=) (TExpr a) (TExpr b) =
+    TExpr (Binary (MkBinaryOp (nullCmpOp (<=)) "leq" (Just "<=") False 4) a b)
+
+-- | Nullable-aware greater-than-or-equal.
+(.>=) ::
+    (NullableCmpOp a b (NullCmpResult a b), Ord (BaseType a)) =>
+    TExpr cols a ->
+    TExpr cols b ->
+    TExpr cols (NullCmpResult a b)
+(.>=) (TExpr a) (TExpr b) =
+    TExpr (Binary (MkBinaryOp (nullCmpOp (>=)) "geq" (Just ">=") False 4) a b)
+
+-- | Nullable-aware greater-than.
+(.>) ::
+    (NullableCmpOp a b (NullCmpResult a b), Ord (BaseType a)) =>
+    TExpr cols a ->
+    TExpr cols b ->
+    TExpr cols (NullCmpResult a b)
+(.>) (TExpr a) (TExpr b) =
+    TExpr (Binary (MkBinaryOp (nullCmpOp (>)) "gt" (Just ">") False 4) a b)
 
 not :: TExpr cols Bool -> TExpr cols Bool
 not (TExpr e) = TExpr (Unary (MkUnaryOp Prelude.not "not" (Just "!")) e)

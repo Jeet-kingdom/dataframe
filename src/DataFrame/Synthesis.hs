@@ -260,7 +260,7 @@ fitClassifier target d b df =
             []
             [] of
             Nothing -> Left "No programs found"
-            Just p -> Right (F.ifThenElse (p .> 0) 1 0)
+            Just p -> Right (F.ifThenElse (p .> (0 :: Expr Double)) 1 0)
 
 percentiles :: DataFrame -> [Expr Double]
 percentiles df =

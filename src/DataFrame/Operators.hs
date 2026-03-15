@@ -19,8 +19,16 @@ import DataFrame.Internal.Expression (
     NamedExpr,
     UExpr (UExpr),
  )
+import DataFrame.Internal.Nullable (
+    BaseType,
+    NullCmpResult,
+    NullableArithOp (nullArithOp),
+    NullableCmpOp (nullCmpOp),
+ )
 
 infix 8 .^^
+infix 6 .+, .-
+infix 7 .*, ./
 infix 4 .==, .<, .<=, .>=, .>, ./=
 infixr 3 .&&
 infixr 2 .||
@@ -50,11 +58,90 @@ lit = Lit
 (.=) :: (Columnable a) => T.Text -> Expr a -> NamedExpr
 (.=) = flip as
 
-(.==) :: (Columnable a, Eq a) => Expr a -> Expr a -> Expr Bool
+-- Nullable-aware arithmetic operators
+
+{- | Nullable-aware addition. Works for all combinations of nullable\/non-nullable operands.
+@col \@Int "x" .+ col \@(Maybe Int) "y"  -- :: Expr (Maybe Int)@
+-}
+(.+) ::
+    (NullableArithOp a b c, Num (BaseType a)) =>
+    Expr a ->
+    Expr b ->
+    Expr c
+(.+) =
+    Binary
+        ( MkBinaryOp
+            { binaryFn = nullArithOp (+)
+            , binaryName = "nulladd"
+            , binarySymbol = Just "+"
+            , binaryCommutative = True
+            , binaryPrecedence = 6
+            }
+        )
+
+-- | Nullable-aware subtraction.
+(.-) ::
+    (NullableArithOp a b c, Num (BaseType a)) =>
+    Expr a ->
+    Expr b ->
+    Expr c
+(.-) =
+    Binary
+        ( MkBinaryOp
+            { binaryFn = nullArithOp (-)
+            , binaryName = "nullsub"
+            , binarySymbol = Just "-"
+            , binaryCommutative = False
+            , binaryPrecedence = 6
+            }
+        )
+
+-- | Nullable-aware multiplication.
+(.*) ::
+    (NullableArithOp a b c, Num (BaseType a)) =>
+    Expr a ->
+    Expr b ->
+    Expr c
+(.*) =
+    Binary
+        ( MkBinaryOp
+            { binaryFn = nullArithOp (*)
+            , binaryName = "nullmul"
+            , binarySymbol = Just "*"
+            , binaryCommutative = True
+            , binaryPrecedence = 7
+            }
+        )
+
+-- | Nullable-aware division.
+(./) ::
+    (NullableArithOp a b c, Fractional (BaseType a)) =>
+    Expr a ->
+    Expr b ->
+    Expr c
+(./) =
+    Binary
+        ( MkBinaryOp
+            { binaryFn = nullArithOp (/)
+            , binaryName = "nulldiv"
+            , binarySymbol = Just "/"
+            , binaryCommutative = False
+            , binaryPrecedence = 7
+            }
+        )
+
+-- Nullable-aware comparison operators (three-valued logic: Nothing if either operand is Nothing)
+
+-- | Nullable-aware equality. Returns @Maybe Bool@ when either operand is nullable.
+(.==) ::
+    (NullableCmpOp a b (NullCmpResult a b), Eq (BaseType a)) =>
+    Expr a ->
+    Expr b ->
+    Expr (NullCmpResult a b)
 (.==) =
     Binary
         ( MkBinaryOp
-            { binaryFn = (==)
+            { binaryFn = nullCmpOp (==)
             , binaryName = "eq"
             , binarySymbol = Just "=="
             , binaryCommutative = True
@@ -62,11 +149,16 @@ lit = Lit
             }
         )
 
-(./=) :: (Columnable a, Eq a) => Expr a -> Expr a -> Expr Bool
+-- | Nullable-aware inequality.
+(./=) ::
+    (NullableCmpOp a b (NullCmpResult a b), Eq (BaseType a)) =>
+    Expr a ->
+    Expr b ->
+    Expr (NullCmpResult a b)
 (./=) =
     Binary
         ( MkBinaryOp
-            { binaryFn = (/=)
+            { binaryFn = nullCmpOp (/=)
             , binaryName = "neq"
             , binarySymbol = Just "/="
             , binaryCommutative = True
@@ -74,11 +166,16 @@ lit = Lit
             }
         )
 
-(.<) :: (Columnable a, Ord a) => Expr a -> Expr a -> Expr Bool
+-- | Nullable-aware less-than.
+(.<) ::
+    (NullableCmpOp a b (NullCmpResult a b), Ord (BaseType a)) =>
+    Expr a ->
+    Expr b ->
+    Expr (NullCmpResult a b)
 (.<) =
     Binary
         ( MkBinaryOp
-            { binaryFn = (<)
+            { binaryFn = nullCmpOp (<)
             , binaryName = "lt"
             , binarySymbol = Just "<"
             , binaryCommutative = False
@@ -86,11 +183,16 @@ lit = Lit
             }
         )
 
-(.>) :: (Columnable a, Ord a) => Expr a -> Expr a -> Expr Bool
+-- | Nullable-aware greater-than.
+(.>) ::
+    (NullableCmpOp a b (NullCmpResult a b), Ord (BaseType a)) =>
+    Expr a ->
+    Expr b ->
+    Expr (NullCmpResult a b)
 (.>) =
     Binary
         ( MkBinaryOp
-            { binaryFn = (>)
+            { binaryFn = nullCmpOp (>)
             , binaryName = "gt"
             , binarySymbol = Just ">"
             , binaryCommutative = False
@@ -98,11 +200,16 @@ lit = Lit
             }
         )
 
-(.<=) :: (Columnable a, Ord a, Eq a) => Expr a -> Expr a -> Expr Bool
+-- | Nullable-aware less-than-or-equal.
+(.<=) ::
+    (NullableCmpOp a b (NullCmpResult a b), Ord (BaseType a)) =>
+    Expr a ->
+    Expr b ->
+    Expr (NullCmpResult a b)
 (.<=) =
     Binary
         ( MkBinaryOp
-            { binaryFn = (<=)
+            { binaryFn = nullCmpOp (<=)
             , binaryName = "leq"
             , binarySymbol = Just "<="
             , binaryCommutative = False
@@ -110,11 +217,16 @@ lit = Lit
             }
         )
 
-(.>=) :: (Columnable a, Ord a, Eq a) => Expr a -> Expr a -> Expr Bool
+-- | Nullable-aware greater-than-or-equal.
+(.>=) ::
+    (NullableCmpOp a b (NullCmpResult a b), Ord (BaseType a)) =>
+    Expr a ->
+    Expr b ->
+    Expr (NullCmpResult a b)
 (.>=) =
     Binary
         ( MkBinaryOp
-            { binaryFn = (>=)
+            { binaryFn = nullCmpOp (>=)
             , binaryName = "geq"
             , binarySymbol = Just ">="
             , binaryCommutative = False

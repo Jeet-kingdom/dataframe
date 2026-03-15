@@ -70,14 +70,30 @@ module DataFrame.Typed (
     ifThenElse,
     lift,
     lift2,
+    nullLift,
+    nullLift2,
 
-    -- * Comparison operators
+    -- * Same-type comparison operators
     (.==.),
     (./=.),
     (.<.),
     (.<=.),
     (.>=.),
     (.>.),
+
+    -- * Nullable-aware arithmetic operators
+    (.+),
+    (.-),
+    (.*),
+    (./),
+
+    -- * Nullable-aware comparison operators (three-valued logic)
+    (.==),
+    (./=),
+    (.<),
+    (.<=),
+    (.>=),
+    (.>),
 
     -- * Logical operators
     (.&&.),

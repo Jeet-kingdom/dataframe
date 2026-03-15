@@ -274,13 +274,24 @@ mapColumn ::
     (b -> c) -> Column -> Either DataFrameException Column
 mapColumn f = \case
     BoxedColumn (col :: VB.Vector a) -> run col
-    OptionalColumn (col :: VB.Vector a) -> run col
+    OptionalColumn (col :: VB.Vector (Maybe a)) -> runOpt col
     UnboxedColumn (col :: VU.Vector a) -> runUnboxed col
   where
     run :: forall a. (Typeable a) => VB.Vector a -> Either DataFrameException Column
     run col = case testEquality (typeRep @a) (typeRep @b) of
         Just Refl -> Right (fromVector @c (VB.map f col))
         Nothing -> throwTypeMismatch @a @b
+
+    -- For OptionalColumn: first try exact match (b = Maybe a, user maps over Maybe
+    -- values directly), then try lenient fmap fallback (b = a, auto-fmap over inner).
+    runOpt ::
+        forall a.
+        (Columnable a) => VB.Vector (Maybe a) -> Either DataFrameException Column
+    runOpt col = case testEquality (typeRep @(Maybe a)) (typeRep @b) of
+        Just Refl -> Right (fromVector @c (VB.map f col))
+        Nothing -> case testEquality (typeRep @a) (typeRep @b) of
+            Just Refl -> Right (OptionalColumn (VB.map (fmap f) col))
+            Nothing -> throwTypeMismatch @(Maybe a) @b
 
     runUnboxed ::
         forall a.
@@ -299,13 +310,22 @@ imapColumn ::
     (Int -> b -> c) -> Column -> Either DataFrameException Column
 imapColumn f = \case
     BoxedColumn (col :: VB.Vector a) -> run col
-    OptionalColumn (col :: VB.Vector a) -> run col
+    OptionalColumn (col :: VB.Vector (Maybe a)) -> runOpt col
     UnboxedColumn (col :: VU.Vector a) -> runUnboxed col
   where
     run :: forall a. (Typeable a) => VB.Vector a -> Either DataFrameException Column
     run col = case testEquality (typeRep @a) (typeRep @b) of
         Just Refl -> Right (fromVector @c (VB.imap f col))
         Nothing -> throwTypeMismatch @a @b
+
+    runOpt ::
+        forall a.
+        (Columnable a) => VB.Vector (Maybe a) -> Either DataFrameException Column
+    runOpt col = case testEquality (typeRep @(Maybe a)) (typeRep @b) of
+        Just Refl -> Right (fromVector @c (VB.imap f col))
+        Nothing -> case testEquality (typeRep @a) (typeRep @b) of
+            Just Refl -> Right (OptionalColumn (VB.imap (fmap . f) col))
+            Nothing -> throwTypeMismatch @(Maybe a) @b
 
     runUnboxed ::
         forall a.

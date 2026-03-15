@@ -49,6 +49,7 @@ How-to Guides
 
    cookbook
    coming_from_other_implementations
+   working_with_nulls
 
 Explanation
 -----------

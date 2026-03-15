@@ -18,7 +18,7 @@ import GHC.Conc
 n <- getNumProcessors
 setNumCapabilities $ max 1 (min 4 (n-1))
 
-default (Int, T.Text, Double)
+default (Bool, Int, T.Text, Double)
 
 :def! declareColumns \s -> return ("_ = (); declareColumns " ++ s)
 :{

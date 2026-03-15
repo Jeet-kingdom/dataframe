@@ -601,7 +601,11 @@ numericExprs cfg df prevExprs depth maxDepth
                             (disallowedCombinations cfg)
                         )
                 )
-            [e1 + e2, e1 - e2, e1 * e2, F.ifThenElse (e2 ./= 0) (e1 / e2) 0]
+            [ e1 + e2
+                , e1 - e2
+                , e1 * e2
+                , F.ifThenElse (e2 ./= (0 :: Expr Double)) (e1 / e2) 0
+                ]
 
 boolExprs ::
     DataFrame -> [Expr Bool] -> [Expr Bool] -> Int -> Int -> [Expr Bool]
@@ -625,7 +629,7 @@ generateConditionsOld cfg df =
         genConds colName = case unsafeGetColumn colName df of
             (BoxedColumn (col :: V.Vector a)) ->
                 let ps = map (Lit . (`percentileOrd'` col)) [1, 25, 75, 99]
-                 in map (Col @a colName .==) ps
+                 in map (F.lift2 (==) (Col @a colName)) ps
             (OptionalColumn (col :: V.Vector (Maybe a))) -> case sFloating @a of
                 STrue ->
                     let doubleCol =
@@ -633,9 +637,9 @@ generateConditionsOld cfg df =
                                 (V.map fromJust (V.filter isJust (V.map (fmap (realToFrac @a @Double)) col)))
                      in zipWith
                             ($)
-                            [ (Col @(Maybe a) colName .==)
-                            , (Col @(Maybe a) colName .<=)
-                            , (Col @(Maybe a) colName .>=)
+                            [ F.lift2 (==) (Col @(Maybe a) colName)
+                            , F.lift2 (<=) (Col @(Maybe a) colName)
+                            , F.lift2 (>=) (Col @(Maybe a) colName)
                             ]
                             ( Lit Nothing
                                 : map
@@ -649,9 +653,9 @@ generateConditionsOld cfg df =
                                     (V.map fromJust (V.filter isJust (V.map (fmap (fromIntegral @a @Double)) col)))
                          in zipWith
                                 ($)
-                                [ (Col @(Maybe a) colName .==)
-                                , (Col @(Maybe a) colName .<=)
-                                , (Col @(Maybe a) colName .>=)
+                                [ F.lift2 (==) (Col @(Maybe a) colName)
+                                , F.lift2 (<=) (Col @(Maybe a) colName)
+                                , F.lift2 (>=) (Col @(Maybe a) colName)
                                 ]
                                 ( Lit Nothing
                                     : map
@@ -660,7 +664,7 @@ generateConditionsOld cfg df =
                                 )
                     SFalse ->
                         map
-                            ((Col @(Maybe a) colName .==) . Lit . (`percentileOrd'` col))
+                            (F.lift2 (==) (Col @(Maybe a) colName) . Lit . (`percentileOrd'` col))
                             [1, 25, 75, 99]
             (UnboxedColumn (_ :: VU.Vector a)) -> []
 
@@ -681,15 +685,18 @@ generateConditionsOld cfg df =
                 (BoxedColumn (col1 :: V.Vector a), BoxedColumn (_ :: V.Vector b)) ->
                     case testEquality (typeRep @a) (typeRep @b) of
                         Nothing -> []
-                        Just Refl -> [Col @a l .== Col @a r]
+                        Just Refl -> [F.lift2 (==) (Col @a l) (Col @a r)]
                 (UnboxedColumn (_ :: VU.Vector a), UnboxedColumn (_ :: VU.Vector b)) -> []
                 ( OptionalColumn (_ :: V.Vector (Maybe a))
                     , OptionalColumn (_ :: V.Vector (Maybe b))
                     ) -> case testEquality (typeRep @a) (typeRep @b) of
                         Nothing -> []
                         Just Refl -> case testEquality (typeRep @a) (typeRep @T.Text) of
-                            Nothing -> [Col @(Maybe a) l .<= Col r, Col @(Maybe a) l .== Col r]
-                            Just Refl -> [Col @(Maybe a) l .== Col r]
+                            Nothing ->
+                                [ F.lift2 (<=) (Col @(Maybe a) l) (Col r)
+                                , F.lift2 (==) (Col @(Maybe a) l) (Col r)
+                                ]
+                            Just Refl -> [F.lift2 (==) (Col @(Maybe a) l) (Col r)]
                 _ -> []
      in
         concatMap genConds (columnNames df) ++ columnConds

@@ -12,6 +12,37 @@ Before diving into specific examples, it's important to understand the core phil
 4. **Immutability**: All operations return new DataFrames rather than modifying existing ones
 5. **No Implicit Conversions**: Type conversions and transformations must be explicit
 
+## Three APIs, One Library
+
+The library ships three complementary API layers. You can mix them freely — they all operate on the
+same underlying `DataFrame` type at runtime.
+
+| Layer | Import | Best for |
+|---|---|---|
+| **Untyped** | `import qualified DataFrame as D` | Exploration, scripting, one-off analysis |
+| **Frame monad** | `import DataFrame.Monad` | Sequential pipelines where an intermediate column feeds later steps |
+| **Typed** | `import qualified DataFrame.Typed as T` | Production code, libraries, anywhere a schema change should be a compile error |
+
+**Untyped** is what most of this guide uses: expressions built with `F.col @Type "name"` and
+operations like `D.derive`, `D.filterWhere`, `D.groupBy`.  Column names are strings — typos only
+surface at runtime.
+
+**Frame monad** (`FrameM`) is a thin state monad over `DataFrame`.  `deriveM` returns the
+column expression you just added, so you can feed it directly into the next step without repeating
+the string name.  `inspectM` lets you peek at the frame mid-pipeline without breaking the chain.
+The whole computation stays pure — `execFrameM df m` just runs it.
+
+**Typed** wraps `DataFrame` in a phantom type that tracks the full schema as a type-level list of
+`Column "name" Type` entries.  The `freeze`/`freezeWithError` boundary validates the runtime
+frame against the declared schema.  After that, every column access (`T.col @"salary"`), every
+derivation (`T.derive @"bonus"`), and every `select`/`exclude`/`rename` is checked at compile time.
+Operations like `T.filterAllJust` go further — they change the **type**, promoting `Maybe Int`
+columns to `Int` in the result schema so that downstream code can no longer treat them as optional.
+
+For large files that do not fit in memory, a fourth layer — `DataFrame.Lazy` — provides a lazy,
+streaming query engine. See the [Polars Lazy API vs DataFrame.Lazy](#polars-lazy-api-vs-dataframelazy)
+section for a detailed comparison.
+
 ## Coming from pandas
 
 We'll port over concepts from [10 minutes to Pandas](https://pandas.pydata.org/docs/user_guide/10min.html), showing how familiar pandas operations map to our library.
@@ -355,6 +386,74 @@ ghci| :}
 - The predicate function receives each value from that column
 - We use the pipe operator `|>` to chain operations
 - This approach is more flexible than index-based selection since it works with any filtering logic
+
+### The Same Pipeline, Three Ways
+
+To make the comparison concrete, here is the same "derive a column, filter on it, select a subset"
+workflow written in all three API layers.  We use the random-data DataFrame from earlier (columns
+`date`, `A`, `B`, `C`, `D`).
+
+#### Untyped (reference)
+
+```haskell
+import qualified DataFrame as D
+import qualified DataFrame.Functions as F
+import DataFrame.Operators
+
+df |> D.derive "doubled_A" (F.col @Double "A" * F.lit 2)
+   |> D.filterWhere (F.col @Double "doubled_A" .> F.lit 1.0)
+   |> D.select ["date", "doubled_A"]
+```
+
+Straightforward, but the string `"doubled_A"` appears twice.  If you rename the column in `derive`
+but forget to update `filterWhere`, the error only appears when the code runs.
+
+#### Frame monad
+
+```haskell
+import DataFrame.Monad
+
+execFrameM df $ do
+    doubledA <- deriveM "doubled_A" (F.col @Double "A" * F.lit 2)
+    filterWhereM (doubledA .> F.lit 1.0)
+    modifyM (D.select ["date", "doubled_A"])
+```
+
+`deriveM` returns `doubledA :: Expr Double` — the live expression for the column that was just
+added.  The subsequent `filterWhereM` uses that value directly rather than looking the column
+up by name.
+
+**Why it's better**: the string `"doubled_A"` appears exactly once.  A rename refactoring only
+touches the `deriveM` call; the `filterWhereM` argument follows automatically because it holds a
+reference to the expression, not a copy of the name.
+
+#### Typed API
+
+```haskell
+{-# LANGUAGE DataKinds, TypeApplications #-}
+import qualified DataFrame.Typed as T
+import Data.Time.Calendar (Day)
+
+type MySchema = '[ T.Column "date" Day
+                 , T.Column "A"    Double
+                 , T.Column "B"    Double
+                 , T.Column "C"    Double
+                 , T.Column "D"    Double
+                 ]
+
+case T.freeze @MySchema df of
+    Nothing  -> error "schema mismatch at startup"
+    Just tdf ->
+        tdf |> T.derive @"doubled_A" (T.col @"A" * T.lit 2)
+            |> T.filterWhere (T.col @"doubled_A" .> T.lit 1.0)
+            |> T.select @'["date", "doubled_A"]
+```
+
+**Why it's better**: `T.col @"A"` is a compile-time error if the column `"A"` does not exist in
+`MySchema` or has the wrong type.  The same applies to `T.col @"doubled_A"` in `filterWhere` — if
+you accidentally filter before deriving, or use the wrong type annotation, the code does not
+compile.  Typos in column names, wrong aggregation types, and schema-breaking refactors are all
+caught before the program runs.
 
 ### Missing Values
 
@@ -877,6 +976,155 @@ Integer |      Double       |       Double       |          [Text]
 
 The `collect` aggregation gathers all values in a group into a list, which is our library's way of handling list-like aggregations.
 
+### Complex Aggregations — Frame Monad Version
+
+The same decade/name/average pipeline reads naturally as a sequential script with the Frame monad.
+`inspectM` lets you peek at the shape of the frame mid-pipeline without interrupting the chain.
+
+```haskell
+import DataFrame.Monad
+import qualified Data.Text as T
+
+let decade d = let (y, _, _) = toGregorian d in (y `div` 10) * 10
+    firstName = head . T.split (== ' ')
+
+execFrameM df_csv $ do
+    modifyM (D.derive "name"   (F.lift firstName (F.col @T.Text "name")))
+    modifyM (D.derive "decade" (F.lift decade    (F.col @Day    "birthdate")))
+    modifyM (D.exclude ["birthdate"])
+    shape <- inspectM D.dimensions   -- peek: how many rows/cols so far?
+    modifyM (D.groupBy ["decade"])
+    modifyM $ D.aggregate
+        [ F.mean    (F.col @Double "weight") `as` "avg_weight"
+        , F.mean    (F.col @Double "height") `as` "avg_height"
+        , F.collect (F.col @T.Text "name")   `as` "names"
+        ]
+```
+
+`inspectM D.dimensions` reads the current frame dimensions and returns them as the monadic result
+without mutating the frame — useful for printing debug info or assertions in the middle of a long
+pipeline.
+
+### Complex Aggregations — Typed Version
+
+Here the schema is declared upfront and every column access is validated at compile time.
+
+```haskell
+{-# LANGUAGE DataKinds, TypeApplications #-}
+import qualified DataFrame.Typed as T
+import Data.Time.Calendar (Day)
+
+type BirthdateSchema = '[ T.Column "name"      T.Text
+                        , T.Column "birthdate"  Day
+                        , T.Column "weight"     Double
+                        , T.Column "height"     Double
+                        ]
+
+-- After the typed ops the result schema is inferred by the compiler:
+-- '[ Column "decade" Int, Column "avg_weight" Double
+--  , Column "avg_height" Double, Column "names" [T.Text] ]
+example :: T.TypedDataFrame BirthdateSchema -> IO ()
+example tdf = do
+    let result = T.aggregate
+                    ( T.agg @"avg_weight" (T.mean (T.col @"weight"))
+                    $ T.agg @"avg_height" (T.mean (T.col @"height"))
+                    $ T.agg @"names"      (T.collect (T.col @"name"))
+                    $ T.aggNil )
+                    (T.groupBy @'["decade"] tdf')
+        tdf' = tdf
+            |> T.derive @"name"   (T.lift firstName (T.col @"name"))
+            |> T.derive @"decade" (T.lift decade    (T.col @"birthdate"))
+            |> T.exclude @'["birthdate"]
+    print (T.thaw result)
+  where
+    decade d = let (y, _, _) = toGregorian d in (y `div` 10) * 10
+    firstName = head . T.split (== ' ')
+```
+
+**Why it's better**: `T.agg @"avg_weight" (T.mean (T.col @"weight"))` is checked in two ways at
+compile time — `"weight"` must exist in the schema with type `Double`, and the result column
+`"avg_weight"` will have type `Double` in the output schema.  A wrong output-type annotation causes
+a type error before the program runs.
+
+### Polars Lazy API vs DataFrame.Lazy
+
+Polars provides a lazy API that defers execution until `.collect()` is called, enabling predicate
+pushdown and dead-column elimination similar to what `DataFrame.Lazy` does.  Here is a direct
+comparison.
+
+**Polars lazy:**
+
+```python
+import polars as pl
+
+result = (
+    pl.scan_csv("data.csv")
+      .filter(pl.col("height") > 1.7)
+      .select(["name", "weight", "height"])
+      .with_columns(
+          (pl.col("weight") / pl.col("height") ** 2).alias("bmi")
+      )
+      .collect()
+)
+```
+
+**Haskell lazy:**
+
+```haskell
+import qualified DataFrame.Lazy as L
+import qualified DataFrame.Functions as F
+import DataFrame.Operators
+import DataFrame.Internal.Schema (Schema, schemaType)
+import Data.Proxy (Proxy (..))
+
+mySchema :: Schema
+mySchema = [ ("name",   schemaType @T.Text)
+           , ("weight", schemaType @Double)
+           , ("height", schemaType @Double)
+           ]
+
+result :: IO DataFrame
+result = L.runDataFrame $
+    L.scanCsv mySchema "data.csv"
+    |> L.filter (F.col @Double "height" .> F.lit 1.7)
+    |> L.select ["name", "weight", "height"]
+    |> L.derive "bmi" (F.col @Double "weight" ./
+                       (F.col @Double "height" * F.col @Double "height"))
+```
+
+**When Polars lazy is excellent too**: Polars lazy is mature, fast, and ergonomic for Python
+workflows.  Its type inference is automatic — you rarely need to declare schemas.
+
+**What Haskell's static schema adds on top**:
+
+- **Schema required upfront**: `mySchema` tells the optimizer the column names and types before
+  touching the file.  The optimizer knows which columns to read and what types to allocate in each
+  batch — no runtime inference pass needed.
+- **Optimizer runs before IO**: `L.runDataFrame` calls the rule-based optimizer first, then
+  streams.  Dead columns (those not referenced downstream) are eliminated at the scan level —
+  bytes never leave disk.  Filter predicates are pushed into `ScanConfig` so each batch is
+  filtered on arrival.
+- **Streaming execution**: the pull-based executor processes one batch at a time (default
+  1 000 000 rows); memory footprint is bounded by batch size regardless of file size.
+- **Same expression DSL**: `L.filter`, `L.derive`, `L.select` accept the same `Expr a` values
+  used in the untyped eager API — no parallel expression DSL to learn.
+- **Composable with eager frames**: `L.fromDataFrame df` lifts an already-loaded frame into a
+  lazy plan, so you can mix streaming scans with in-memory frames in one pipeline.
+
+**Scanning Parquet and limiting rows** (Polars has `.scan_parquet` and `.head(n)`):
+
+```haskell
+result :: IO DataFrame
+result = L.runDataFrame $
+    L.scanParquet mySchema "warehouse/events.parquet"
+    |> L.filter  (F.col @T.Text "country" .== F.lit "US")
+    |> L.select  ["event_id", "country", "revenue"]
+    |> L.limit   1000
+```
+
+`L.limit n` is pushed into the physical plan so the executor stops pulling batches once `n` rows
+have been collected — equivalent to Polars' `.head(n)` on a lazy frame.
+
 ---
 
 ## Coming from dplyr
@@ -1132,6 +1380,62 @@ starwars
 2. `filterWhere` allows filtering based on multiple column conditions using `.&&` (AND) and `.|` (OR)
 3. Type annotations ensure we're comparing the right types
 
+### BMI + Group Pipeline — Frame Monad Version
+
+The same species-group pipeline reads as an imperative script while remaining pure (no IO):
+
+```haskell
+import DataFrame.Monad
+
+execFrameM starwars $ do
+    modifyM D.filterAllJust          -- drop rows with any Nothing
+    bmiCol <- deriveM "bmi"
+                  (F.col @Double "mass"
+                   / F.pow (F.col @Double "height" / F.lit 100) 2)
+    filterWhereM (bmiCol .> F.lit 20.0)
+    modifyM (D.select ["name", "height", "mass", "bmi"])
+```
+
+**Why it's better**: `D.filterAllJust` drops rows with any `Nothing` in one call — no separate
+`filterJust` per column.  `deriveM` returns the column expression directly; `filterWhereM` uses
+it without repeating the name `"bmi"`.  The pipeline is a sequence of plain `do` steps that reads
+like prose.
+
+### BMI + Group Pipeline — Typed Version
+
+With the typed API, `filterAllJust` changes the **schema type** — `Maybe` columns become non-`Maybe`
+in the result, so any downstream code that still treats them as optional fails at compile time:
+
+```haskell
+{-# LANGUAGE DataKinds, TypeApplications #-}
+import qualified DataFrame.Typed as T
+
+type StarwarsSchema =
+    '[ T.Column "name"    T.Text
+     , T.Column "height"  (Maybe Double)
+     , T.Column "mass"    (Maybe Double)
+     , T.Column "species" T.Text
+     ]
+
+-- filterAllJust strips Maybe from every column:
+-- result :: TypedDataFrame '[Column "name" Text, Column "height" Double, ...]
+example :: T.TypedDataFrame StarwarsSchema -> T.TypedDataFrame _
+example tdf =
+    let stripped = T.filterAllJust tdf
+        -- After filterAllJust, "height" and "mass" are Double (not Maybe Double)
+        withBmi = T.derive @"bmi"
+                      (T.col @"mass" / (T.col @"height" / T.lit 100) ^ 2)
+                      stripped
+    in withBmi
+        |> T.filterWhere (T.col @"bmi" .> T.lit 20.0)
+        |> T.select @'["name", "height", "mass", "bmi"]
+```
+
+**Why it's better**: after `T.filterAllJust`, `T.col @"height"` has type `TExpr cols Double` —
+using it in an arithmetic expression just works.  Before the strip, `T.col @"height"` has type
+`TExpr cols (Maybe Double)`, so the same arithmetic expression would be a type error.  The
+compiler enforces that you handle missing values before doing math on them.
+
 ---
 
 ## Summary of Key Patterns
@@ -1142,44 +1446,120 @@ starwars
 2. **Types as Documentation**: Type signatures tell you what's possible
 3. **Composition Over Configuration**: Use Haskell functions to build complex operations
 4. **Functional Pipeline**: Chain operations using `|>` for readable data transformations
+5. **Three layers, one runtime**: pick the API that matches your safety needs — untyped, Frame monad, or Typed — and mix them in the same project
 
-### Common Idioms
+### Common Idioms — Three APIs Side by Side
 
-**Creating DataFrames:**
+#### Deriving a column
+
+**Untyped**
 ```haskell
-df = D.fromNamedColumns [
-    ("col1", D.fromList [val1, val2, ...]),
-    ("col2", D.fromList [val3, val4, ...])
-]
+df |> D.derive "bonus" (F.col @Double "salary" * F.lit 0.1)
 ```
 
-**Selecting and Filtering:**
+**Frame monad**
 ```haskell
-df |> D.select ["col1", "col2"]
-   |> D.filter "col1" (> (10 :: Int))
+execFrameM df $ do
+    bonus <- deriveM "bonus" (F.col @Double "salary" * F.lit 0.1)
+    -- `bonus` is now an Expr Double you can reuse without repeating "bonus"
+    ...
 ```
 
-**Creating Derived Columns:**
+**Typed**
 ```haskell
-df |> D.derive "new_col" (old_col * 2)
+-- T.derive prepends Column "bonus" Double to the schema type
+tdf |> T.derive @"bonus" (T.col @"salary" * T.lit 0.1)
 ```
 
-**Grouping and Aggregating:**
+#### Filtering rows
+
+**Untyped**
 ```haskell
-df |> D.groupBy ["group_col"]
-   |> D.aggregate [ F.mean val `as` "avg_val"
-                  , F.count val `as` "n"
+df |> D.filterWhere (F.col @Double "salary" .> F.lit 50000)
+```
+
+**Frame monad**
+```haskell
+execFrameM df $ filterWhereM (F.col @Double "salary" .> F.lit 50000)
+```
+
+**Typed**
+```haskell
+tdf |> T.filterWhere (T.col @"salary" .> T.lit 50000)
+```
+
+#### Grouping and aggregating
+
+**Untyped**
+```haskell
+df |> D.groupBy ["dept"]
+   |> D.aggregate [ F.mean  (F.col @Double "salary") `as` "avg_salary"
+                  , F.count (F.col @Double "salary") `as` "n"
                   ]
 ```
 
-**Handling Missing Data:**
+**Frame monad**
+```haskell
+execFrameM df $ do
+    modifyM (D.groupBy ["dept"])
+    modifyM $ D.aggregate
+        [ F.mean  (F.col @Double "salary") `as` "avg_salary"
+        , F.count (F.col @Double "salary") `as` "n"
+        ]
+```
+
+**Typed**
+```haskell
+T.aggregate
+    ( T.agg @"avg_salary" (T.mean  (T.col @"salary"))
+    $ T.agg @"n"          (T.count (T.col @"salary"))
+    $ T.aggNil )
+    (T.groupBy @'["dept"] tdf)
+```
+
+#### Handling missing data
+
+**Untyped**
 ```haskell
 -- Filter out Nothing values
 df |> D.filterJust "col"
 
--- Fill Nothing with default
+-- Fill Nothing with a default
 df |> D.impute (F.col @Type "col") defaultVal
 ```
+
+**Frame monad**
+```haskell
+execFrameM df $ do
+    col' <- filterJustM (F.col @(Maybe Double) "col")
+    _    <- imputeM (F.col @(Maybe Int) "other") 0
+    ...
+```
+
+**Typed**
+```haskell
+-- filterAllJust strips Maybe from ALL columns in the schema type
+let stripped = T.filterAllJust tdf
+
+-- impute strips Maybe from a single named column
+let filled = T.impute @"col" (0 :: Double) tdf
+```
+
+#### Large files — lazy streaming
+
+```haskell
+import qualified DataFrame.Lazy as L
+
+result <- L.runDataFrame $
+    L.scanCsv mySchema "large_file.csv"
+    |> L.filter  (F.col @Double "revenue" .> F.lit 1000)
+    |> L.select  ["id", "region", "revenue"]
+    |> L.derive  "tax" (F.col @Double "revenue" * F.lit 0.2)
+    |> L.limit   10000
+```
+
+The optimizer pushes the filter into the scan and drops unreferenced columns before reading;
+`limit` stops the executor as soon as enough rows have accumulated.
 
 ### Type Annotations
 
@@ -1192,6 +1572,16 @@ filter "col" (== ("text" :: T.Text))  -- Specify string type
 ```
 
 This explicitness catches errors early and serves as inline documentation.
+
+### Choosing Your API Layer
+
+| Situation | Recommended layer |
+|---|---|
+| Exploring a new dataset in GHCi | Untyped |
+| A script that derives several columns and each feeds the next | Frame monad |
+| A library function whose callers should not worry about column names | Typed |
+| A file too large to fit in memory | `DataFrame.Lazy` |
+| Mixing all of the above | They interoperate: `T.thaw` unwraps to `DataFrame`; `T.freeze` wraps; `L.fromDataFrame` lifts eager to lazy |
 
 ---
 

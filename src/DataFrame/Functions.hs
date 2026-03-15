@@ -1,5 +1,4 @@
 {-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
@@ -11,6 +10,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module DataFrame.Functions (module DataFrame.Functions, module DataFrame.Operators) where
@@ -43,6 +43,13 @@ import Data.Word
 import qualified DataFrame.IO.CSV as CSV
 import qualified DataFrame.IO.Parquet as Parquet
 import DataFrame.IO.Parquet.Thrift
+import DataFrame.Internal.Nullable (
+    BaseType,
+    NullLift1Op (applyNull1),
+    NullLift1Result,
+    NullLift2Op (applyNull2),
+    NullLift2Result,
+ )
 import DataFrame.Operators
 import Debug.Trace (trace)
 import Language.Haskell.TH
@@ -71,6 +78,81 @@ lift2 f =
             , binaryPrecedence = 0
             }
         )
+
+{- | Lift a unary function over a nullable or non-nullable column expression.
+When the input is @Maybe a@, 'Nothing' short-circuits (like 'fmap').
+When the input is plain @a@, the function is applied directly.
+
+The return type is inferred via 'NullLift1Result': no annotation needed.
+-}
+nullLift ::
+    (NullLift1Op a r (NullLift1Result a r), Columnable (NullLift1Result a r)) =>
+    (BaseType a -> r) ->
+    Expr a ->
+    Expr (NullLift1Result a r)
+nullLift f =
+    Unary
+        (MkUnaryOp{unaryFn = applyNull1 f, unaryName = "nullLift", unarySymbol = Nothing})
+
+{- | Lift a binary function over nullable or non-nullable column expressions.
+Any 'Nothing' operand short-circuits to 'Nothing' in the result.
+
+The return type is inferred via 'NullLift2Result': no annotation needed.
+-}
+nullLift2 ::
+    (NullLift2Op a b r (NullLift2Result a b r), Columnable (NullLift2Result a b r)) =>
+    (BaseType a -> BaseType b -> r) ->
+    Expr a ->
+    Expr b ->
+    Expr (NullLift2Result a b r)
+nullLift2 f =
+    Binary
+        ( MkBinaryOp
+            { binaryFn = applyNull2 f
+            , binaryName = "nullLift2"
+            , binarySymbol = Nothing
+            , binaryCommutative = False
+            , binaryPrecedence = 0
+            }
+        )
+
+{- | Lenient numeric \/ text coercion returning @Maybe a@.  Looks up column
+@name@ and coerces its values to @a@.  Values that cannot be converted
+(parse failures, type mismatches) become 'Nothing'; successfully converted
+values are wrapped in 'Just'.  Existing 'Nothing' in optional source columns
+stays as 'Nothing'.
+-}
+cast :: forall a. (Columnable a) => T.Text -> Expr (Maybe a)
+cast name = CastWith name "cast" (either (const Nothing) Just)
+
+{- | Lenient coercion that substitutes a default for unconvertible values.
+Looks up column @name@, coerces its values to @a@, and uses @def@ wherever
+conversion fails or the source value is 'Nothing'.
+-}
+castWithDefault :: forall a. (Columnable a) => a -> T.Text -> Expr a
+castWithDefault def name =
+    CastWith name ("castWithDefault:" <> T.pack (show def)) (fromRight def)
+
+{- | Lenient coercion returning @Either T.Text a@.  Successfully converted
+values are 'Right'; values that cannot be parsed are kept as 'Left' with
+their original string representation, so the caller can inspect or handle
+them downstream.  Existing 'Nothing' in optional source columns becomes
+@Left \"null\"@.
+-}
+castEither :: forall a. (Columnable a) => T.Text -> Expr (Either T.Text a)
+castEither name = CastWith name "castEither" (either (Left . T.pack) Right)
+
+{- | Lenient coercion for assertedly non-nullable columns.
+Substitutes @error@ for @Nothing@, so it will crash at evaluation time if
+any @Nothing@ is actually encountered.  For non-nullable and
+fully-populated nullable columns no cost is paid.
+-}
+unsafeCast :: forall a. (Columnable a) => T.Text -> Expr a
+unsafeCast name =
+    CastWith
+        name
+        "unsafeCast"
+        (fromRight (error "unsafeCast: unexpected Nothing in column"))
 
 liftDecorated ::
     (Columnable a, Columnable b) =>
@@ -115,20 +197,22 @@ div = lift2Decorated Prelude.div "div" (Just "//") False 7
 mod :: (Integral a, Columnable a) => Expr a -> Expr a -> Expr a
 mod = lift2Decorated Prelude.mod "mod" Nothing False 7
 
-eq :: (Columnable a, Eq a) => Expr a -> Expr a -> Expr Bool
-eq = (.==)
+eq :: (Columnable a, Eq a, a ~ BaseType a) => Expr a -> Expr a -> Expr Bool
+eq = lift2Decorated (==) "eq" (Just "==") True 4
 
-lt :: (Columnable a, Ord a) => Expr a -> Expr a -> Expr Bool
-lt = (.<)
+lt :: (Columnable a, Ord a, a ~ BaseType a) => Expr a -> Expr a -> Expr Bool
+lt = lift2Decorated (<) "lt" (Just "<") False 4
 
-gt :: (Columnable a, Ord a) => Expr a -> Expr a -> Expr Bool
-gt = (.>)
+gt :: (Columnable a, Ord a, a ~ BaseType a) => Expr a -> Expr a -> Expr Bool
+gt = lift2Decorated (>) "gt" (Just ">") False 4
 
-leq :: (Columnable a, Ord a, Eq a) => Expr a -> Expr a -> Expr Bool
-leq = (.<=)
+leq ::
+    (Columnable a, Ord a, Eq a, a ~ BaseType a) => Expr a -> Expr a -> Expr Bool
+leq = lift2Decorated (<=) "leq" (Just "<=") False 4
 
-geq :: (Columnable a, Ord a, Eq a) => Expr a -> Expr a -> Expr Bool
-geq = (.>=)
+geq ::
+    (Columnable a, Ord a, Eq a, a ~ BaseType a) => Expr a -> Expr a -> Expr Bool
+geq = lift2Decorated (>=) "geq" (Just ">=") False 4
 
 and :: Expr Bool -> Expr Bool -> Expr Bool
 and = (.&&)
