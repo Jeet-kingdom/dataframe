@@ -30,3 +30,4 @@ coverage-html
 flake.lock
 tags
 __pycache__
+venv
