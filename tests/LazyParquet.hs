@@ -110,7 +110,7 @@ sortAndLimit =
         ( do
             actual <-
                 L.runDataFrame
-                    ( L.limit
+                    ( L.take
                         3
                         ( L.sortBy
                             [("id", Ascending)]

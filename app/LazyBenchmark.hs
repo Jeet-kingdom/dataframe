@@ -224,7 +224,7 @@ main = do
     -- Demonstrates that the executor reads only the first batch.
     runQuery "Q1 — preview first 20 rows (no filter)" $
         L.runDataFrame $
-            L.limit 20 $
+            L.take 20 $
                 L.scanCsv schema pathT
 
     -- Q2: Filter + limit.
@@ -232,7 +232,7 @@ main = do
     -- ~512 matches in the first batch and stops — reads only one batch.
     runQuery "Q2 — filter (x > 0.999), limit 20" $
         L.runDataFrame $
-            L.limit 20 $
+            L.take 20 $
                 L.filter (col @Double "x" .> lit (0.999 :: Double)) $
                     L.scanCsv schema pathT
 
@@ -241,7 +241,7 @@ main = do
     -- Predicate pushdown moves the filter into the scan batch loop.
     runQuery "Q3 — filter (x > 0.999), derive z = x*y, select [id,z], limit 20" $
         L.runDataFrame $
-            L.limit 20 $
+            L.take 20 $
                 L.select ["id", "z"] $
                     L.derive "z" (col @Double "x" * col @Double "y") $
                         L.filter (col @Double "x" .> lit (0.999 :: Double)) $
@@ -253,7 +253,7 @@ main = do
     -- We limit to keep result size manageable.
     runQuery "Q4 — filter fusion: (x > 0.5) . (y > 0.5), limit 20" $
         L.runDataFrame $
-            L.limit 20 $
+            L.take 20 $
                 L.filter (col @Double "y" .> lit (0.5 :: Double)) $
                     L.filter (col @Double "x" .> lit (0.5 :: Double)) $
                         L.scanCsv schema pathT

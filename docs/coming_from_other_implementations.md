@@ -1119,10 +1119,10 @@ result = L.runDataFrame $
     L.scanParquet mySchema "warehouse/events.parquet"
     |> L.filter  (F.col @T.Text "country" .== F.lit "US")
     |> L.select  ["event_id", "country", "revenue"]
-    |> L.limit   1000
+    |> L.take   1000
 ```
 
-`L.limit n` is pushed into the physical plan so the executor stops pulling batches once `n` rows
+`L.take n` is pushed into the physical plan so the executor stops pulling batches once `n` rows
 have been collected — equivalent to Polars' `.head(n)` on a lazy frame.
 
 ---
@@ -1555,7 +1555,7 @@ result <- L.runDataFrame $
     |> L.filter  (F.col @Double "revenue" .> F.lit 1000)
     |> L.select  ["id", "region", "revenue"]
     |> L.derive  "tax" (F.col @Double "revenue" * F.lit 0.2)
-    |> L.limit   10000
+    |> L.take   10000
 ```
 
 The optimizer pushes the filter into the scan and drops unreferenced columns before reading;

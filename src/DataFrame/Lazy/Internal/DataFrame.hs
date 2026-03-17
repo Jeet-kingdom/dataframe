@@ -134,5 +134,5 @@ sortBy :: [(T.Text, SortOrder)] -> LazyDataFrame -> LazyDataFrame
 sortBy cols ldf = ldf{plan = Sort cols (plan ldf)}
 
 -- | Retain at most @n@ rows.
-limit :: Int -> LazyDataFrame -> LazyDataFrame
-limit n ldf = ldf{plan = Limit n (plan ldf)}
+take :: Int -> LazyDataFrame -> LazyDataFrame
+take n ldf = ldf{plan = Limit n (plan ldf)}
