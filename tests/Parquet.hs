@@ -10,9 +10,15 @@ import qualified DataFrame.IO.Parquet as DP
 
 import qualified Data.ByteString as BS
 import Data.Int
+import qualified Data.Set as S
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Time
 import Data.Word
+import DataFrame.Internal.Column (hasMissing)
+import DataFrame.Internal.DataFrame (unsafeGetColumn)
+import DataFrame.IO.Parquet.Thrift (columnMetaData, columnPathInSchema, columnStatistics, rowGroupColumns, rowGroups, schema)
+import DataFrame.IO.Parquet.Types (columnNullCount)
 import DataFrame.Internal.Binary (
     littleEndianWord32,
     littleEndianWord64,
@@ -1687,6 +1693,46 @@ nationDictMalformed =
             (D.readParquet "./tests/data/nation.dict-malformed.parquet")
         )
 
+shardedNullableSchema :: Test
+shardedNullableSchema =
+    TestCase $ do
+        metas <- mapM (fmap fst . DP.readMetadataFromPath)
+            ["data/sharded/part-0.parquet", "data/sharded/part-1.parquet"]
+        let nullableCols = S.fromList
+                [ last (map T.pack colPath)
+                | meta  <- metas
+                , rg    <- rowGroups meta
+                , cc    <- rowGroupColumns rg
+                , let cm      = columnMetaData cc
+                      colPath = columnPathInSchema cm
+                , not (null colPath)
+                , columnNullCount (columnStatistics cm) > 0
+                ]
+            df = foldl (\acc meta -> acc <> F.schemaToEmptyDataFrame nullableCols (schema meta))
+                       D.empty
+                       metas
+        assertBool "id should be nullable"    (hasMissing (unsafeGetColumn "id"    df))
+        assertBool "name should be nullable"  (hasMissing (unsafeGetColumn "name"  df))
+        assertBool "score should be nullable" (hasMissing (unsafeGetColumn "score" df))
+
+singleShardNoNulls :: Test
+singleShardNoNulls =
+    TestCase $ do
+        (meta, _) <- DP.readMetadataFromPath "data/sharded/part-0.parquet"
+        let nullableCols = S.fromList
+                [ last (map T.pack colPath)
+                | rg    <- rowGroups meta
+                , cc    <- rowGroupColumns rg
+                , let cm      = columnMetaData cc
+                      colPath = columnPathInSchema cm
+                , not (null colPath)
+                , columnNullCount (columnStatistics cm) > 0
+                ]
+            df = F.schemaToEmptyDataFrame nullableCols (schema meta)
+        assertBool "id should NOT be nullable"    (not (hasMissing (unsafeGetColumn "id"    df)))
+        assertBool "name should NOT be nullable"  (not (hasMissing (unsafeGetColumn "name"  df)))
+        assertBool "score should NOT be nullable" (not (hasMissing (unsafeGetColumn "score" df)))
+
 tests :: [Test]
 tests =
     [ allTypesPlain
@@ -1780,4 +1826,7 @@ tests =
     , unknownLogicalType
     , -- Group 12: malformed files
       nationDictMalformed
+    , -- Group 13: metadata-based null detection
+      shardedNullableSchema
+    , singleShardNoNulls
     ]

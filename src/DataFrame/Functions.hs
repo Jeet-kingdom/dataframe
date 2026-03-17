@@ -41,9 +41,11 @@ import Data.Time
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import Data.Word
+import qualified Data.Set as S
 import qualified DataFrame.IO.CSV as CSV
 import qualified DataFrame.IO.Parquet as Parquet
 import DataFrame.IO.Parquet.Thrift
+import DataFrame.IO.Parquet.Types (columnNullCount)
 import DataFrame.Internal.Nullable (
     BaseType,
     NullLift1Op (applyNull1),
@@ -537,33 +539,39 @@ declareColumnsFromCsvFile path = do
 declareColumnsFromParquetFile :: String -> DecsQ
 declareColumnsFromParquetFile path = do
     isDir <- liftIO $ doesDirectoryExist path
-
     let pat = if isDir then path </> "*.parquet" else path
-
     matches <- liftIO $ glob pat
-
     files <- liftIO $ filterM (fmap Prelude.not . doesDirectoryExist) matches
-    df <-
-        liftIO $
-            foldM
-                ( \acc p -> do
-                    (metadata, _) <- liftIO (Parquet.readMetadataFromPath p)
-                    let d = schemaToEmptyDataFrame (schema metadata)
-                    pure $ acc <> d
-                )
-                DataFrame.Internal.DataFrame.empty
-                files
+    metas <- liftIO $ mapM (fmap fst . Parquet.readMetadataFromPath) files
+    let nullableCols :: S.Set T.Text
+        nullableCols = S.fromList
+            [ T.pack (last colPath)
+            | meta  <- metas
+            , rg    <- rowGroups meta
+            , cc    <- rowGroupColumns rg
+            , let cm      = columnMetaData cc
+                  colPath = columnPathInSchema cm
+            , Prelude.not (null colPath)
+            , columnNullCount (columnStatistics cm) > 0
+            ]
+    let df = foldl (\acc meta -> acc <> schemaToEmptyDataFrame nullableCols (schema meta))
+                   DataFrame.Internal.DataFrame.empty
+                   metas
     declareColumns df
 
-schemaToEmptyDataFrame :: [SchemaElement] -> DataFrame
-schemaToEmptyDataFrame elems =
+schemaToEmptyDataFrame :: S.Set T.Text -> [SchemaElement] -> DataFrame
+schemaToEmptyDataFrame nullableCols elems =
     let leafElems = filter (\e -> numChildren e == 0) elems
-     in fromNamedColumns (map schemaElemToColumn leafElems)
+     in fromNamedColumns (map (schemaElemToColumn nullableCols) leafElems)
 
-schemaElemToColumn :: SchemaElement -> (T.Text, Column)
-schemaElemToColumn elem =
-    let name = elementName elem
-     in (name, emptyColumnForType (elementType elem))
+schemaElemToColumn :: S.Set T.Text -> SchemaElement -> (T.Text, Column)
+schemaElemToColumn nullableCols elem =
+    let name   = elementName elem
+        isNull = name `S.member` nullableCols
+        col    = if isNull
+                     then emptyNullableColumnForType (elementType elem)
+                     else emptyColumnForType         (elementType elem)
+     in (name, col)
 
 emptyColumnForType :: TType -> Column
 emptyColumnForType = \case
@@ -577,6 +585,19 @@ emptyColumnForType = \case
     DOUBLE -> fromList @Double []
     STRING -> fromList @T.Text []
     other -> error $ "Unsupported parquet type for column: " <> show other
+
+emptyNullableColumnForType :: TType -> Column
+emptyNullableColumnForType = \case
+    BOOL   -> fromList @(Maybe Bool)   []
+    BYTE   -> fromList @(Maybe Word8)  []
+    I16    -> fromList @(Maybe Int16)  []
+    I32    -> fromList @(Maybe Int32)  []
+    I64    -> fromList @(Maybe Int64)  []
+    I96    -> fromList @(Maybe Int64)  []
+    FLOAT  -> fromList @(Maybe Float)  []
+    DOUBLE -> fromList @(Maybe Double) []
+    STRING -> fromList @(Maybe T.Text) []
+    other  -> error $ "Unsupported parquet type for column: " <> show other
 
 declareColumnsFromCsvWithOpts :: CSV.ReadOptions -> String -> DecsQ
 declareColumnsFromCsvWithOpts opts path = do
