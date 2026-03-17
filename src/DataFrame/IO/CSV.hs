@@ -169,7 +169,7 @@ data HeaderSpec = NoHeader | UseFirstRow | ProvideNames [T.Text]
 
 data TypeSpec
     = InferFromSample Int
-    | SpecifyTypes [(T.Text, SchemaType)]
+    | SpecifyTypes [(T.Text, SchemaType)] TypeSpec
     | NoInference
 
 -- | CSV read parameters.
@@ -202,14 +202,16 @@ data ReadOptions = ReadOptions
 
 shouldInferFromSample :: TypeSpec -> Bool
 shouldInferFromSample (InferFromSample _) = True
+shouldInferFromSample (SpecifyTypes _ fallback) = shouldInferFromSample fallback
 shouldInferFromSample _ = False
 
 schemaTypeMap :: TypeSpec -> M.Map T.Text SchemaType
-schemaTypeMap (SpecifyTypes xs) = M.fromList xs
+schemaTypeMap (SpecifyTypes xs _) = M.fromList xs
 schemaTypeMap _ = M.empty
 
 typeInferenceSampleSize :: TypeSpec -> Int
 typeInferenceSampleSize (InferFromSample n) = n
+typeInferenceSampleSize (SpecifyTypes _ fallback) = typeInferenceSampleSize fallback
 typeInferenceSampleSize _ = 0
 
 defaultReadOptions :: ReadOptions
@@ -327,7 +329,7 @@ initializeColumns names row opts = zipWithM initColumn names (map lookupType nam
     -- Return Nothing for columns that should be inferred from BS
     shouldInfer = case typeSpec opts of
         InferFromSample _ -> True
-        SpecifyTypes _ -> False
+        SpecifyTypes _ fallback -> shouldInferFromSample fallback
         NoInference -> False
     lookupType name = M.lookup name typeMap
     initColumn :: T.Text -> Maybe SchemaType -> IO BuilderColumn
