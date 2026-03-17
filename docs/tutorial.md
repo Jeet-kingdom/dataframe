@@ -1,6 +1,6 @@
 # Tutorial: Your first analysis with `dataframe` (Iris)
 
-> A hands‑on, copy‑paste‑friendly tour of the **dataframe** ecosystem.
+A hands-on, copy-paste-friendly tour of the **dataframe** ecosystem.
 
 By the end of this tutorial you will have:
 
