@@ -11,7 +11,7 @@ import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
 import qualified DataFrame.Internal.DataFrame as DI
 import DataFrame.Internal.Expression (Expr)
-import DataFrame.Operators ((.+), (.-), (.==))
+import DataFrame.Operators ((.*), (.+), (.-), (./), (.==))
 import qualified DataFrame.Typed as DT
 import qualified DataFrame.Typed.Expr as TE
 import DataFrame.Typed.Types (TExpr (..))
@@ -221,6 +221,399 @@ nullLift2IntInt =
         )
 
 -- ---------------------------------------------------------------------------
+-- Cross-type arithmetic (Int × Double promotion)
+-- ---------------------------------------------------------------------------
+
+-- DataFrame with Int, Maybe Int, Double, Maybe Double columns
+crossData :: D.DataFrame
+crossData =
+    D.fromNamedColumns
+        [ ("x", DI.fromList ([1, 2, 3] :: [Int]))
+        , ("y", DI.OptionalColumn (V.fromList [Just 10, Nothing, Just 30 :: Maybe Int]))
+        , ("d", DI.fromList ([1.5, 2.5, 3.5] :: [Double]))
+        ,
+            ( "md"
+            , DI.OptionalColumn (V.fromList [Just 10.5, Nothing, Just 30.5 :: Maybe Double])
+            )
+        ]
+
+-- | col @Int .+ col @Double → Double
+addIntDouble :: Test
+addIntDouble =
+    TestCase
+        ( assertEqual
+            "Int .+ Double = Double"
+            (Just $ DI.fromList [2.5, 4.5, 6.5 :: Double])
+            ( DI.getColumn "result" $
+                D.derive "result" (F.col @Int "x" .+ F.col @Double "d") crossData
+            )
+        )
+
+-- | col @Double .+ col @Int → Double
+addDoubleInt :: Test
+addDoubleInt =
+    TestCase
+        ( assertEqual
+            "Double .+ Int = Double"
+            (Just $ DI.fromList [2.5, 4.5, 6.5 :: Double])
+            ( DI.getColumn "result" $
+                D.derive "result" (F.col @Double "d" .+ F.col @Int "x") crossData
+            )
+        )
+
+-- | col @(Maybe Int) .+ col @Double → Maybe Double
+addMaybeIntDouble :: Test
+addMaybeIntDouble =
+    TestCase
+        ( assertEqual
+            "Maybe Int .+ Double = Maybe Double"
+            ( Just $
+                DI.OptionalColumn (V.fromList [Just 11.5, Nothing, Just 33.5 :: Maybe Double])
+            )
+            ( DI.getColumn "result" $
+                D.derive "result" (F.col @(Maybe Int) "y" .+ F.col @Double "d") crossData
+            )
+        )
+
+-- | col @Int .+ col @(Maybe Double) → Maybe Double
+addIntMaybeDouble :: Test
+addIntMaybeDouble =
+    TestCase
+        ( assertEqual
+            "Int .+ Maybe Double = Maybe Double"
+            ( Just $
+                DI.OptionalColumn (V.fromList [Just 11.5, Nothing, Just 33.5 :: Maybe Double])
+            )
+            ( DI.getColumn "result" $
+                D.derive "result" (F.col @Int "x" .+ F.col @(Maybe Double) "md") crossData
+            )
+        )
+
+-- | col @(Maybe Int) .+ col @(Maybe Double) → Maybe Double
+addMaybeIntMaybeDouble :: Test
+addMaybeIntMaybeDouble =
+    TestCase
+        ( assertEqual
+            "Maybe Int .+ Maybe Double = Maybe Double"
+            ( Just $
+                DI.OptionalColumn (V.fromList [Just 20.5, Nothing, Just 60.5 :: Maybe Double])
+            )
+            ( DI.getColumn "result" $
+                D.derive
+                    "result"
+                    (F.col @(Maybe Int) "y" .+ F.col @(Maybe Double) "md")
+                    crossData
+            )
+        )
+
+-- | col @Int .- col @Double → Double
+subIntDouble :: Test
+subIntDouble =
+    TestCase
+        ( assertEqual
+            "Int .- Double = Double"
+            (Just $ DI.fromList [-0.5, -0.5, -0.5 :: Double])
+            ( DI.getColumn "result" $
+                D.derive "result" (F.col @Int "x" .- F.col @Double "d") crossData
+            )
+        )
+
+-- | col @Int .* col @Double → Double
+mulIntDouble :: Test
+mulIntDouble =
+    TestCase
+        ( assertEqual
+            "Int .* Double = Double"
+            (Just $ DI.fromList [1.5, 5.0, 10.5 :: Double])
+            ( DI.getColumn "result" $
+                D.derive "result" (F.col @Int "x" .* F.col @Double "d") crossData
+            )
+        )
+
+-- | col @Double .- col @Int → Double
+subDoubleInt :: Test
+subDoubleInt =
+    TestCase
+        ( assertEqual
+            "Double .- Int = Double"
+            (Just $ DI.fromList [0.5, 0.5, 0.5 :: Double])
+            ( DI.getColumn "result" $
+                D.derive "result" (F.col @Double "d" .- F.col @Int "x") crossData
+            )
+        )
+
+-- | col @(Maybe Int) .- col @Double → Maybe Double
+subMaybeIntDouble :: Test
+subMaybeIntDouble =
+    TestCase
+        ( assertEqual
+            "Maybe Int .- Double = Maybe Double"
+            ( Just $
+                DI.OptionalColumn (V.fromList [Just 8.5, Nothing, Just 26.5 :: Maybe Double])
+            )
+            ( DI.getColumn "result" $
+                D.derive "result" (F.col @(Maybe Int) "y" .- F.col @Double "d") crossData
+            )
+        )
+
+-- | col @Int .- col @(Maybe Double) → Maybe Double
+subIntMaybeDouble :: Test
+subIntMaybeDouble =
+    TestCase
+        ( assertEqual
+            "Int .- Maybe Double = Maybe Double"
+            ( Just $
+                DI.OptionalColumn
+                    (V.fromList [Just (-9.5), Nothing, Just (-27.5) :: Maybe Double])
+            )
+            ( DI.getColumn "result" $
+                D.derive "result" (F.col @Int "x" .- F.col @(Maybe Double) "md") crossData
+            )
+        )
+
+-- | col @(Maybe Int) .- col @(Maybe Double) → Maybe Double
+subMaybeIntMaybeDouble :: Test
+subMaybeIntMaybeDouble =
+    TestCase
+        ( assertEqual
+            "Maybe Int .- Maybe Double = Maybe Double"
+            ( Just $
+                DI.OptionalColumn
+                    (V.fromList [Just (-0.5), Nothing, Just (-0.5) :: Maybe Double])
+            )
+            ( DI.getColumn "result" $
+                D.derive
+                    "result"
+                    (F.col @(Maybe Int) "y" .- F.col @(Maybe Double) "md")
+                    crossData
+            )
+        )
+
+-- | col @Double .* col @Int → Double
+mulDoubleInt :: Test
+mulDoubleInt =
+    TestCase
+        ( assertEqual
+            "Double .* Int = Double"
+            (Just $ DI.fromList [1.5, 5.0, 10.5 :: Double])
+            ( DI.getColumn "result" $
+                D.derive "result" (F.col @Double "d" .* F.col @Int "x") crossData
+            )
+        )
+
+-- | col @(Maybe Int) .* col @Double → Maybe Double
+mulMaybeIntDouble :: Test
+mulMaybeIntDouble =
+    TestCase
+        ( assertEqual
+            "Maybe Int .* Double = Maybe Double"
+            ( Just $
+                DI.OptionalColumn (V.fromList [Just 15.0, Nothing, Just 105.0 :: Maybe Double])
+            )
+            ( DI.getColumn "result" $
+                D.derive "result" (F.col @(Maybe Int) "y" .* F.col @Double "d") crossData
+            )
+        )
+
+-- | col @Int .* col @(Maybe Double) → Maybe Double
+mulIntMaybeDouble :: Test
+mulIntMaybeDouble =
+    TestCase
+        ( assertEqual
+            "Int .* Maybe Double = Maybe Double"
+            ( Just $
+                DI.OptionalColumn (V.fromList [Just 10.5, Nothing, Just 91.5 :: Maybe Double])
+            )
+            ( DI.getColumn "result" $
+                D.derive "result" (F.col @Int "x" .* F.col @(Maybe Double) "md") crossData
+            )
+        )
+
+-- | col @(Maybe Int) .* col @(Maybe Double) → Maybe Double
+mulMaybeIntMaybeDouble :: Test
+mulMaybeIntMaybeDouble =
+    TestCase
+        ( assertEqual
+            "Maybe Int .* Maybe Double = Maybe Double"
+            ( Just $
+                DI.OptionalColumn (V.fromList [Just 105.0, Nothing, Just 915.0 :: Maybe Double])
+            )
+            ( DI.getColumn "result" $
+                D.derive
+                    "result"
+                    (F.col @(Maybe Int) "y" .* F.col @(Maybe Double) "md")
+                    crossData
+            )
+        )
+
+-- Division tests use clean-dividing data: x=[2,4,6], d=[1,2,3]
+divData :: D.DataFrame
+divData =
+    D.fromNamedColumns
+        [ ("x", DI.fromList ([2, 4, 6] :: [Int]))
+        , ("y", DI.OptionalColumn (V.fromList [Just 4, Nothing, Just 6 :: Maybe Int]))
+        , ("d", DI.fromList ([1.0, 2.0, 3.0] :: [Double]))
+        ,
+            ( "md"
+            , DI.OptionalColumn (V.fromList [Just 1.0, Nothing, Just 3.0 :: Maybe Double])
+            )
+        ]
+
+-- | col @Int ./ col @Double → Double
+divIntDouble :: Test
+divIntDouble =
+    TestCase
+        ( assertEqual
+            "Int ./ Double = Double"
+            (Just $ DI.fromList [2.0, 2.0, 2.0 :: Double])
+            ( DI.getColumn "result" $
+                D.derive "result" (F.col @Int "x" ./ F.col @Double "d") divData
+            )
+        )
+
+-- | col @Double ./ col @Int → Double
+divDoubleInt :: Test
+divDoubleInt =
+    TestCase
+        ( assertEqual
+            "Double ./ Int = Double"
+            (Just $ DI.fromList [0.5, 0.5, 0.5 :: Double])
+            ( DI.getColumn "result" $
+                D.derive "result" (F.col @Double "d" ./ F.col @Int "x") divData
+            )
+        )
+
+-- | col @(Maybe Int) ./ col @Double → Maybe Double
+divMaybeIntDouble :: Test
+divMaybeIntDouble =
+    TestCase
+        ( assertEqual
+            "Maybe Int ./ Double = Maybe Double"
+            ( Just $
+                DI.OptionalColumn (V.fromList [Just 4.0, Nothing, Just 2.0 :: Maybe Double])
+            )
+            ( DI.getColumn "result" $
+                D.derive "result" (F.col @(Maybe Int) "y" ./ F.col @Double "d") divData
+            )
+        )
+
+-- | col @Int ./ col @(Maybe Double) → Maybe Double
+divIntMaybeDouble :: Test
+divIntMaybeDouble =
+    TestCase
+        ( assertEqual
+            "Int ./ Maybe Double = Maybe Double"
+            ( Just $
+                DI.OptionalColumn (V.fromList [Just 2.0, Nothing, Just 2.0 :: Maybe Double])
+            )
+            ( DI.getColumn "result" $
+                D.derive "result" (F.col @Int "x" ./ F.col @(Maybe Double) "md") divData
+            )
+        )
+
+-- | col @(Maybe Int) ./ col @(Maybe Double) → Maybe Double
+divMaybeIntMaybeDouble :: Test
+divMaybeIntMaybeDouble =
+    TestCase
+        ( assertEqual
+            "Maybe Int ./ Maybe Double = Maybe Double"
+            ( Just $
+                DI.OptionalColumn (V.fromList [Just 4.0, Nothing, Just 2.0 :: Maybe Double])
+            )
+            ( DI.getColumn "result" $
+                D.derive "result" (F.col @(Maybe Int) "y" ./ F.col @(Maybe Double) "md") divData
+            )
+        )
+
+-- ---------------------------------------------------------------------------
+-- Typed TExpr layer — cross-type arithmetic
+-- ---------------------------------------------------------------------------
+
+type CrossSchema =
+    '[ DT.Column "x" Int
+     , DT.Column "y" (Maybe Int)
+     , DT.Column "d" Double
+     , DT.Column "md" (Maybe Double)
+     ]
+
+typedCrossData :: DT.TypedDataFrame CrossSchema
+typedCrossData =
+    either (error . show) id $
+        DT.freezeWithError @CrossSchema crossData
+
+-- | Typed: col @"x" .+ col @"d"  → Double
+typedAddIntDouble :: Test
+typedAddIntDouble =
+    TestCase
+        ( assertEqual
+            "Typed: Int .+ Double = Double"
+            [2.5, 4.5, 6.5 :: Double]
+            ( DT.columnAsList @"result" $
+                DT.derive @"result" (TE.col @"x" TE..+ TE.col @"d") typedCrossData
+            )
+        )
+
+-- | Typed: col @"y" .+ col @"d"  → Maybe Double
+typedAddMaybeIntDouble :: Test
+typedAddMaybeIntDouble =
+    TestCase
+        ( assertEqual
+            "Typed: Maybe Int .+ Double = Maybe Double"
+            [Just 11.5, Nothing, Just 33.5]
+            ( DT.columnAsList @"result" $
+                DT.derive @"result" (TE.col @"y" TE..+ TE.col @"d") typedCrossData
+            )
+        )
+
+-- | Typed: col @"x" .+ col @"md"  → Maybe Double
+typedAddIntMaybeDouble :: Test
+typedAddIntMaybeDouble =
+    TestCase
+        ( assertEqual
+            "Typed: Int .+ Maybe Double = Maybe Double"
+            [Just 11.5, Nothing, Just 33.5]
+            ( DT.columnAsList @"result" $
+                DT.derive @"result" (TE.col @"x" TE..+ TE.col @"md") typedCrossData
+            )
+        )
+
+-- | Typed: col @"y" .+ col @"md"  → Maybe Double
+typedAddMaybeIntMaybeDouble :: Test
+typedAddMaybeIntMaybeDouble =
+    TestCase
+        ( assertEqual
+            "Typed: Maybe Int .+ Maybe Double = Maybe Double"
+            [Just 20.5, Nothing, Just 60.5]
+            ( DT.columnAsList @"result" $
+                DT.derive @"result" (TE.col @"y" TE..+ TE.col @"md") typedCrossData
+            )
+        )
+
+-- | Typed: col @"x" .- col @"d"  → Double
+typedSubIntDouble :: Test
+typedSubIntDouble =
+    TestCase
+        ( assertEqual
+            "Typed: Int .- Double = Double"
+            [-0.5, -0.5, -0.5 :: Double]
+            ( DT.columnAsList @"result" $
+                DT.derive @"result" (TE.col @"x" TE..- TE.col @"d") typedCrossData
+            )
+        )
+
+-- | Typed: col @"x" .* col @"d"  → Double
+typedMulIntDouble :: Test
+typedMulIntDouble =
+    TestCase
+        ( assertEqual
+            "Typed: Int .* Double = Double"
+            [1.5, 5.0, 10.5 :: Double]
+            ( DT.columnAsList @"result" $
+                DT.derive @"result" (TE.col @"x" TE..* TE.col @"d") typedCrossData
+            )
+        )
+
+-- ---------------------------------------------------------------------------
 -- Typed TExpr layer tests
 -- ---------------------------------------------------------------------------
 
@@ -351,4 +744,30 @@ tests =
     , TestLabel "typedNullLift2IntMaybeInt" typedNullLift2IntMaybeInt
     , TestLabel "applyFmapMaybeInt" applyFmapMaybeInt
     , TestLabel "applyPlainInt" applyPlainInt
+    , TestLabel "addIntDouble" addIntDouble
+    , TestLabel "addDoubleInt" addDoubleInt
+    , TestLabel "addMaybeIntDouble" addMaybeIntDouble
+    , TestLabel "addIntMaybeDouble" addIntMaybeDouble
+    , TestLabel "addMaybeIntMaybeDouble" addMaybeIntMaybeDouble
+    , TestLabel "subIntDouble" subIntDouble
+    , TestLabel "subDoubleInt" subDoubleInt
+    , TestLabel "subMaybeIntDouble" subMaybeIntDouble
+    , TestLabel "subIntMaybeDouble" subIntMaybeDouble
+    , TestLabel "subMaybeIntMaybeDouble" subMaybeIntMaybeDouble
+    , TestLabel "mulIntDouble" mulIntDouble
+    , TestLabel "mulDoubleInt" mulDoubleInt
+    , TestLabel "mulMaybeIntDouble" mulMaybeIntDouble
+    , TestLabel "mulIntMaybeDouble" mulIntMaybeDouble
+    , TestLabel "mulMaybeIntMaybeDouble" mulMaybeIntMaybeDouble
+    , TestLabel "divIntDouble" divIntDouble
+    , TestLabel "divDoubleInt" divDoubleInt
+    , TestLabel "divMaybeIntDouble" divMaybeIntDouble
+    , TestLabel "divIntMaybeDouble" divIntMaybeDouble
+    , TestLabel "divMaybeIntMaybeDouble" divMaybeIntMaybeDouble
+    , TestLabel "typedAddIntDouble" typedAddIntDouble
+    , TestLabel "typedAddMaybeIntDouble" typedAddMaybeIntDouble
+    , TestLabel "typedAddIntMaybeDouble" typedAddIntMaybeDouble
+    , TestLabel "typedAddMaybeIntMaybeDouble" typedAddMaybeIntMaybeDouble
+    , TestLabel "typedSubIntDouble" typedSubIntDouble
+    , TestLabel "typedMulIntDouble" typedMulIntDouble
     ]

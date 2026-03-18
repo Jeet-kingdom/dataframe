@@ -335,7 +335,7 @@ zScore :: Expr Double -> Expr Double
 zScore c = (c - mean c) / stddev c
 
 pow :: (Columnable a, Num a) => Expr a -> Int -> Expr a
-pow = (.^^)
+pow expr i = lift2Decorated (^) "max" (Just "^") True 8 expr (Lit i)
 
 relu :: (Columnable a, Num a, Ord a) => Expr a -> Expr a
 relu = liftDecorated (Prelude.max 0) "relu" Nothing

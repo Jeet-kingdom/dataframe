@@ -22,9 +22,13 @@ import DataFrame.Internal.Expression (
 import DataFrame.Internal.Nullable (
     BaseType,
     NullCmpResult,
-    NullableArithOp (nullArithOp),
+    NullLift2Op (applyNull2),
     NullableCmpOp (nullCmpOp),
+    NumericWidenOp,
+    WidenResult,
+    widenArithOp,
  )
+import DataFrame.Internal.Types (Promote)
 
 infix 8 .^^
 infix 6 .+, .-
@@ -64,14 +68,17 @@ lit = Lit
 @col \@Int "x" .+ col \@(Maybe Int) "y"  -- :: Expr (Maybe Int)@
 -}
 (.+) ::
-    (NullableArithOp a b c, Num (BaseType a)) =>
+    ( NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b (Promote (BaseType a) (BaseType b)) (WidenResult a b)
+    , Num (Promote (BaseType a) (BaseType b))
+    ) =>
     Expr a ->
     Expr b ->
-    Expr c
+    Expr (WidenResult a b)
 (.+) =
     Binary
         ( MkBinaryOp
-            { binaryFn = nullArithOp (+)
+            { binaryFn = applyNull2 (widenArithOp (+))
             , binaryName = "nulladd"
             , binarySymbol = Just "+"
             , binaryCommutative = True
@@ -81,14 +88,17 @@ lit = Lit
 
 -- | Nullable-aware subtraction.
 (.-) ::
-    (NullableArithOp a b c, Num (BaseType a)) =>
+    ( NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b (Promote (BaseType a) (BaseType b)) (WidenResult a b)
+    , Num (Promote (BaseType a) (BaseType b))
+    ) =>
     Expr a ->
     Expr b ->
-    Expr c
+    Expr (WidenResult a b)
 (.-) =
     Binary
         ( MkBinaryOp
-            { binaryFn = nullArithOp (-)
+            { binaryFn = applyNull2 (widenArithOp (-))
             , binaryName = "nullsub"
             , binarySymbol = Just "-"
             , binaryCommutative = False
@@ -98,14 +108,17 @@ lit = Lit
 
 -- | Nullable-aware multiplication.
 (.*) ::
-    (NullableArithOp a b c, Num (BaseType a)) =>
+    ( NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b (Promote (BaseType a) (BaseType b)) (WidenResult a b)
+    , Num (Promote (BaseType a) (BaseType b))
+    ) =>
     Expr a ->
     Expr b ->
-    Expr c
+    Expr (WidenResult a b)
 (.*) =
     Binary
         ( MkBinaryOp
-            { binaryFn = nullArithOp (*)
+            { binaryFn = applyNull2 (widenArithOp (*))
             , binaryName = "nullmul"
             , binarySymbol = Just "*"
             , binaryCommutative = True
@@ -115,14 +128,17 @@ lit = Lit
 
 -- | Nullable-aware division.
 (./) ::
-    (NullableArithOp a b c, Fractional (BaseType a)) =>
+    ( NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b (Promote (BaseType a) (BaseType b)) (WidenResult a b)
+    , Fractional (Promote (BaseType a) (BaseType b))
+    ) =>
     Expr a ->
     Expr b ->
-    Expr c
+    Expr (WidenResult a b)
 (./) =
     Binary
         ( MkBinaryOp
-            { binaryFn = nullArithOp (/)
+            { binaryFn = applyNull2 (widenArithOp (/))
             , binaryName = "nulldiv"
             , binarySymbol = Just "/"
             , binaryCommutative = False
@@ -258,16 +274,44 @@ lit = Lit
             }
         )
 
-(.^^) :: (Columnable a, Num a) => Expr a -> Int -> Expr a
-(.^^) expr i =
+(.^^) ::
+    ( Columnable (BaseType a)
+    , Columnable (BaseType b)
+    , Fractional (BaseType a)
+    , Integral (BaseType b)
+    , NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b (BaseType a) a
+    , Num (Promote (BaseType a) (BaseType b))
+    ) =>
+    Expr a -> Expr b -> Expr a
+(.^^) =
     Binary
         ( MkBinaryOp
-            { binaryFn = (^)
+            { binaryFn = applyNull2 (^^)
             , binaryName = "pow"
-            , binarySymbol = Just "^"
+            , binarySymbol = Just "^^"
             , binaryCommutative = False
             , binaryPrecedence = 8
             }
         )
-        expr
-        (Lit i)
+
+(.^) ::
+    ( Columnable (BaseType a)
+    , Columnable (BaseType b)
+    , Num (BaseType a)
+    , Integral (BaseType b)
+    , NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b (BaseType a) a
+    , Num (Promote (BaseType a) (BaseType b))
+    ) =>
+    Expr a -> Expr b -> Expr a
+(.^) =
+    Binary
+        ( MkBinaryOp
+            { binaryFn = applyNull2 (^)
+            , binaryName = "pow"
+            , binarySymbol = Just "^^"
+            , binaryCommutative = False
+            , binaryPrecedence = 8
+            }
+        )

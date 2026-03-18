@@ -127,3 +127,18 @@ sFloating :: forall a. (SBoolI (FloatingTypes a)) => SBool (FloatingTypes a)
 sFloating = sbool @(FloatingTypes a)
 
 type FloatingIf a = When (FloatingTypes a) (Real a, Fractional a)
+
+{- | Numeric type promotion: resolves the common type for mixed arithmetic.
+Double dominates over Float/Int; Float dominates over Int; same types stay unchanged.
+-}
+type family Promote (a :: Type) (b :: Type) :: Type where
+    Promote a a = a
+    Promote Double _ = Double
+    Promote _ Double = Double
+    Promote Float _ = Float
+    Promote _ Float = Float
+    Promote Int64 _ = Int64
+    Promote _ Int64 = Int64
+    Promote Int32 _ = Int32
+    Promote _ Int32 = Int32
+    Promote a _ = a

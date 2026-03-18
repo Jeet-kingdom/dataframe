@@ -129,9 +129,12 @@ import DataFrame.Internal.Nullable (
     NullLift1Result,
     NullLift2Op (applyNull2),
     NullLift2Result,
-    NullableArithOp (nullArithOp),
     NullableCmpOp (nullCmpOp),
+    NumericWidenOp,
+    WidenResult,
+    widenArithOp,
  )
+import DataFrame.Internal.Types (Promote)
 
 import DataFrame.Typed.Schema (AssertPresent, Lookup)
 import DataFrame.Typed.Types (TExpr (..), TSortOrder (..))
@@ -292,39 +295,71 @@ infix 4 .==, ./=, .<, .<=, .>=, .>
 @col \@\"x\" '.+' col \@\"y\"  -- :: TExpr cols (Maybe Int)  when y :: Maybe Int@
 -}
 (.+) ::
-    (NullableArithOp a b c, Num (BaseType a)) =>
+    ( NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b (Promote (BaseType a) (BaseType b)) (WidenResult a b)
+    , Num (Promote (BaseType a) (BaseType b))
+    ) =>
     TExpr cols a ->
     TExpr cols b ->
-    TExpr cols c
+    TExpr cols (WidenResult a b)
 (.+) (TExpr a) (TExpr b) =
-    TExpr (Binary (MkBinaryOp (nullArithOp (+)) "nulladd" (Just "+") True 6) a b)
+    TExpr
+        ( Binary
+            (MkBinaryOp (applyNull2 (widenArithOp (+))) "nulladd" (Just "+") True 6)
+            a
+            b
+        )
 
 -- | Nullable-aware subtraction.
 (.-) ::
-    (NullableArithOp a b c, Num (BaseType a)) =>
+    ( NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b (Promote (BaseType a) (BaseType b)) (WidenResult a b)
+    , Num (Promote (BaseType a) (BaseType b))
+    ) =>
     TExpr cols a ->
     TExpr cols b ->
-    TExpr cols c
+    TExpr cols (WidenResult a b)
 (.-) (TExpr a) (TExpr b) =
-    TExpr (Binary (MkBinaryOp (nullArithOp (-)) "nullsub" (Just "-") False 6) a b)
+    TExpr
+        ( Binary
+            (MkBinaryOp (applyNull2 (widenArithOp (-))) "nullsub" (Just "-") False 6)
+            a
+            b
+        )
 
 -- | Nullable-aware multiplication.
 (.*) ::
-    (NullableArithOp a b c, Num (BaseType a)) =>
+    ( NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b (Promote (BaseType a) (BaseType b)) (WidenResult a b)
+    , Num (Promote (BaseType a) (BaseType b))
+    ) =>
     TExpr cols a ->
     TExpr cols b ->
-    TExpr cols c
+    TExpr cols (WidenResult a b)
 (.*) (TExpr a) (TExpr b) =
-    TExpr (Binary (MkBinaryOp (nullArithOp (*)) "nullmul" (Just "*") True 7) a b)
+    TExpr
+        ( Binary
+            (MkBinaryOp (applyNull2 (widenArithOp (*))) "nullmul" (Just "*") True 7)
+            a
+            b
+        )
 
 -- | Nullable-aware division.
 (./) ::
-    (NullableArithOp a b c, Fractional (BaseType a)) =>
+    ( NumericWidenOp (BaseType a) (BaseType b)
+    , NullLift2Op a b (Promote (BaseType a) (BaseType b)) (WidenResult a b)
+    , Fractional (Promote (BaseType a) (BaseType b))
+    ) =>
     TExpr cols a ->
     TExpr cols b ->
-    TExpr cols c
+    TExpr cols (WidenResult a b)
 (./) (TExpr a) (TExpr b) =
-    TExpr (Binary (MkBinaryOp (nullArithOp (/)) "nulldiv" (Just "/") False 7) a b)
+    TExpr
+        ( Binary
+            (MkBinaryOp (applyNull2 (widenArithOp (/))) "nulldiv" (Just "/") False 7)
+            a
+            b
+        )
 
 -------------------------------------------------------------------------------
 -- Nullable-aware comparison operators (three-valued logic)

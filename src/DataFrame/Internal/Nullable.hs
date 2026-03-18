@@ -1,6 +1,9 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -56,9 +59,15 @@ module DataFrame.Internal.Nullable (
 
     -- * Result-type type family for comparison operators
     NullCmpResult,
+
+    -- * Numeric widening
+    NumericWidenOp (..),
+    widenArithOp,
+    WidenResult,
 ) where
 
 import DataFrame.Internal.Column (Columnable)
+import DataFrame.Internal.Types (Promote)
 
 {- | Strip one layer of 'Maybe'.
 
@@ -337,3 +346,47 @@ instance
     applyNull2 _ Nothing _ = Nothing
     applyNull2 _ _ Nothing = Nothing
     applyNull2 f (Just x) (Just y) = Just (f x y)
+
+-- ---------------------------------------------------------------------------
+-- Numeric widening
+-- ---------------------------------------------------------------------------
+
+{- | Widen two numeric base types to their promoted common type.
+
+When @a ~ b@ the coercions are identity; otherwise one operand is widened
+(e.g. 'Int' → 'Double').
+-}
+class (Columnable (Promote a b)) => NumericWidenOp a b where
+    widen1 :: a -> Promote a b
+    widen2 :: b -> Promote a b
+
+-- | Same type: identity coercions.
+instance {-# OVERLAPPING #-} (Columnable a) => NumericWidenOp a a where
+    widen1 = id
+    widen2 = id
+
+instance NumericWidenOp Int Double where widen1 = fromIntegral; widen2 = id
+instance NumericWidenOp Double Int where
+    widen1 = id
+    widen2 = fromIntegral
+instance NumericWidenOp Float Double where widen1 = realToFrac; widen2 = id
+instance NumericWidenOp Double Float where
+    widen1 = id
+    widen2 = realToFrac
+instance NumericWidenOp Int Float where widen1 = fromIntegral; widen2 = id
+instance NumericWidenOp Float Int where
+    widen1 = id
+    widen2 = fromIntegral
+
+-- | Apply an arithmetic function after widening both operands to their common type.
+widenArithOp ::
+    forall a b.
+    (NumericWidenOp a b) =>
+    (Promote a b -> Promote a b -> Promote a b) ->
+    a ->
+    b ->
+    Promote a b
+widenArithOp f x y = f (widen1 @a @b x) (widen2 @a @b y)
+
+-- | Result type of a widening binary operator, accounting for nullable wrappers.
+type WidenResult a b = NullLift2Result a b (Promote (BaseType a) (BaseType b))
