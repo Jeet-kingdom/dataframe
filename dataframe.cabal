@@ -145,6 +145,7 @@ library
                       stm >= 2.5 && < 3,
                       filepath >= 1.4 && < 2,
                       Glob >= 0.10 && < 1,
+                      http-conduit    >= 2.3 && < 3,
                       streamly-core,
                       streamly-bytestring,
 

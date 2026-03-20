@@ -6,7 +6,7 @@
 
 module DataFrame.IO.Parquet where
 
-import Control.Exception (throw)
+import Control.Exception (throw, try)
 import Control.Monad
 import qualified Data.ByteString as BSO
 import Data.Either
@@ -27,14 +27,27 @@ import DataFrame.Internal.Expression (Expr, getColumns)
 import qualified DataFrame.Operations.Core as DI
 import DataFrame.Operations.Merge ()
 import qualified DataFrame.Operations.Subset as DS
-import System.FilePath.Glob (glob)
+import System.FilePath.Glob (compile, glob, match)
 
+import Data.Aeson (FromJSON (..), eitherDecodeStrict, withObject, (.:))
 import DataFrame.IO.Parquet.Dictionary
 import DataFrame.IO.Parquet.Levels
 import DataFrame.IO.Parquet.Page
 import DataFrame.IO.Parquet.Thrift
 import DataFrame.IO.Parquet.Types
-import System.Directory (doesDirectoryExist)
+import Network.HTTP.Simple (
+    getResponseBody,
+    getResponseStatusCode,
+    httpBS,
+    parseRequest,
+    setRequestHeader,
+ )
+import System.Directory (
+    doesDirectoryExist,
+    getHomeDirectory,
+    getTemporaryDirectory,
+ )
+import System.Environment (lookupEnv)
 
 import qualified Data.Vector.Unboxed as VU
 import DataFrame.IO.Parquet.Seeking
@@ -132,7 +145,13 @@ cleanColPath nodes path = go nodes path False
                     p : go (sChildren n) ps False
 
 readParquetWithOpts :: ParquetReadOptions -> FilePath -> IO DataFrame
-readParquetWithOpts = _readParquetWithOpts Nothing
+readParquetWithOpts opts path
+    | isHFUri path = do
+        paths <- fetchHFParquetFiles path
+        let optsNoRange = opts{rowRange = Nothing}
+        dfs <- mapM (_readParquetWithOpts Nothing optsNoRange) paths
+        pure (applyRowRange opts (mconcat dfs))
+    | otherwise = _readParquetWithOpts Nothing opts path
 
 -- | Internal function to pass testing parameters
 _readParquetWithOpts ::
@@ -292,23 +311,29 @@ ghci|   "./tests/data/alltypes_plain*.parquet"
 @
 -}
 readParquetFilesWithOpts :: ParquetReadOptions -> FilePath -> IO DataFrame
-readParquetFilesWithOpts opts path = do
-    isDir <- doesDirectoryExist path
+readParquetFilesWithOpts opts path
+    | isHFUri path = do
+        files <- fetchHFParquetFiles path
+        let optsWithoutRowRange = opts{rowRange = Nothing}
+        dfs <- mapM (_readParquetWithOpts Nothing optsWithoutRowRange) files
+        pure (applyRowRange opts (mconcat dfs))
+    | otherwise = do
+        isDir <- doesDirectoryExist path
 
-    let pat = if isDir then path </> "*.parquet" else path
+        let pat = if isDir then path </> "*.parquet" else path
 
-    matches <- glob pat
+        matches <- glob pat
 
-    files <- filterM (fmap not . doesDirectoryExist) matches
+        files <- filterM (fmap not . doesDirectoryExist) matches
 
-    case files of
-        [] ->
-            error $
-                "readParquetFiles: no parquet files found for " ++ path
-        _ -> do
-            let optsWithoutRowRange = opts{rowRange = Nothing}
-            dfs <- mapM (readParquetWithOpts optsWithoutRowRange) files
-            pure (applyRowRange opts (mconcat dfs))
+        case files of
+            [] ->
+                error $
+                    "readParquetFiles: no parquet files found for " ++ path
+            _ -> do
+                let optsWithoutRowRange = opts{rowRange = Nothing}
+                dfs <- mapM (readParquetWithOpts optsWithoutRowRange) files
+                pure (applyRowRange opts (mconcat dfs))
 
 -- Options application -----------------------------------------------------
 
@@ -599,3 +624,155 @@ unitDivisor TIME_UNIT_UNKNOWN = 1
 applyScale :: Int32 -> Int32 -> Double
 applyScale scale rawValue =
     fromIntegral rawValue / (10 ^ scale)
+
+-- HuggingFace support -----------------------------------------------------
+
+data HFRef = HFRef
+    { hfOwner :: T.Text
+    , hfDataset :: T.Text
+    , hfGlob :: T.Text
+    }
+
+data HFParquetFile = HFParquetFile
+    { hfpUrl :: T.Text
+    , hfpConfig :: T.Text
+    , hfpSplit :: T.Text
+    , hfpFilename :: T.Text
+    }
+    deriving (Show)
+
+instance FromJSON HFParquetFile where
+    parseJSON = withObject "HFParquetFile" $ \o ->
+        HFParquetFile
+            <$> o .: "url"
+            <*> o .: "config"
+            <*> o .: "split"
+            <*> o .: "filename"
+
+newtype HFParquetResponse = HFParquetResponse {hfParquetFiles :: [HFParquetFile]}
+
+instance FromJSON HFParquetResponse where
+    parseJSON = withObject "HFParquetResponse" $ \o ->
+        HFParquetResponse <$> o .: "parquet_files"
+
+isHFUri :: FilePath -> Bool
+isHFUri = L.isPrefixOf "hf://"
+
+parseHFUri :: FilePath -> Either String HFRef
+parseHFUri path =
+    let stripped = drop (length ("hf://datasets/" :: String)) path
+     in case T.splitOn "/" (T.pack stripped) of
+            (owner : dataset : rest)
+                | not (null rest) ->
+                    Right $ HFRef owner dataset (T.intercalate "/" rest)
+            _ ->
+                Left $ "Invalid hf:// URI (expected hf://datasets/owner/dataset/glob): " ++ path
+
+getHFToken :: IO (Maybe BSO.ByteString)
+getHFToken = do
+    envToken <- lookupEnv "HF_TOKEN"
+    case envToken of
+        Just t -> pure (Just (encodeUtf8 (T.pack t)))
+        Nothing -> do
+            home <- getHomeDirectory
+            let tokenPath = home </> ".cache" </> "huggingface" </> "token"
+            result <- try (BSO.readFile tokenPath) :: IO (Either IOError BSO.ByteString)
+            case result of
+                Right bs -> pure (Just (BSO.takeWhile (/= 10) bs))
+                Left _ -> pure Nothing
+
+{- | Extract the repo-relative path from a HuggingFace download URL.
+URL format: https://huggingface.co/datasets/{owner}/{dataset}/resolve/{ref}/{path}
+Returns the {path} portion (e.g. "data/train-00000-of-00001.parquet").
+-}
+hfUrlRepoPath :: HFParquetFile -> String
+hfUrlRepoPath f =
+    case T.breakOn "/resolve/" (hfpUrl f) of
+        (_, rest)
+            | not (T.null rest) ->
+                -- Drop "/resolve/", then drop the ref component (up to and including "/")
+                T.unpack $ T.drop 1 $ T.dropWhile (/= '/') $ T.drop (T.length "/resolve/") rest
+        _ ->
+            T.unpack (hfpConfig f) </> T.unpack (hfpSplit f) </> T.unpack (hfpFilename f)
+
+matchesGlob :: T.Text -> HFParquetFile -> Bool
+matchesGlob g f = match (compile (T.unpack g)) (hfUrlRepoPath f)
+
+resolveHFUrls :: Maybe BSO.ByteString -> HFRef -> IO [HFParquetFile]
+resolveHFUrls mToken ref = do
+    let dataset = hfOwner ref <> "/" <> hfDataset ref
+    let apiUrl = "https://datasets-server.huggingface.co/parquet?dataset=" ++ T.unpack dataset
+    req0 <- parseRequest apiUrl
+    let req = case mToken of
+            Nothing -> req0
+            Just tok -> setRequestHeader "Authorization" ["Bearer " <> tok] req0
+    resp <- httpBS req
+    let status = getResponseStatusCode resp
+    when (status /= 200) $
+        ioError $
+            userError $
+                "HuggingFace API returned status "
+                    ++ show status
+                    ++ " for dataset "
+                    ++ T.unpack dataset
+    case eitherDecodeStrict (getResponseBody resp) of
+        Left err -> ioError $ userError $ "Failed to parse HF API response: " ++ err
+        Right hfResp -> pure $ filter (matchesGlob (hfGlob ref)) (hfParquetFiles hfResp)
+
+downloadHFFiles :: Maybe BSO.ByteString -> [HFParquetFile] -> IO [FilePath]
+downloadHFFiles mToken files = do
+    tmpDir <- getTemporaryDirectory
+    forM files $ \f -> do
+        -- Derive a collision-resistant temp name from the URL path components
+        let fname = case (hfpConfig f, hfpSplit f) of
+                (c, s) | T.null c && T.null s -> T.unpack (hfpFilename f)
+                (c, s) -> T.unpack c <> "_" <> T.unpack s <> "_" <> T.unpack (hfpFilename f)
+        let destPath = tmpDir </> fname
+        req0 <- parseRequest (T.unpack (hfpUrl f))
+        let req = case mToken of
+                Nothing -> req0
+                Just tok -> setRequestHeader "Authorization" ["Bearer " <> tok] req0
+        resp <- httpBS req
+        let status = getResponseStatusCode resp
+        when (status /= 200) $
+            ioError $
+                userError $
+                    "Failed to download " ++ T.unpack (hfpUrl f) ++ " (HTTP " ++ show status ++ ")"
+        BSO.writeFile destPath (getResponseBody resp)
+        pure destPath
+
+-- | True when the path contains glob wildcard characters.
+hasGlob :: T.Text -> Bool
+hasGlob = T.any (\c -> c == '*' || c == '?' || c == '[')
+
+{- | Build the direct HF repo download URL for a path with no wildcards.
+Format: https://huggingface.co/datasets/{owner}/{dataset}/resolve/main/{path}
+-}
+directHFUrl :: HFRef -> T.Text
+directHFUrl ref =
+    "https://huggingface.co/datasets/"
+        <> hfOwner ref
+        <> "/"
+        <> hfDataset ref
+        <> "/resolve/main/"
+        <> hfGlob ref
+
+fetchHFParquetFiles :: FilePath -> IO [FilePath]
+fetchHFParquetFiles uri = do
+    ref <- case parseHFUri uri of
+        Left err -> ioError (userError err)
+        Right r -> pure r
+    mToken <- getHFToken
+    if hasGlob (hfGlob ref)
+        then do
+            hfFiles <- resolveHFUrls mToken ref
+            when (null hfFiles) $
+                ioError $
+                    userError $
+                        "No parquet files found for " ++ uri
+            downloadHFFiles mToken hfFiles
+        else do
+            -- Direct repo file download — no datasets-server needed
+            let url = directHFUrl ref
+            let filename = last $ T.splitOn "/" (hfGlob ref)
+            downloadHFFiles mToken [HFParquetFile url "" "" filename]

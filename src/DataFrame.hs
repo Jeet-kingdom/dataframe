@@ -301,6 +301,7 @@ import DataFrame.Internal.Row as Row (
     toRowVector,
  )
 import DataFrame.Internal.Schema as Schema (
+    makeSchema,
     schemaType,
  )
 import DataFrame.Operations.Aggregation as Aggregation (

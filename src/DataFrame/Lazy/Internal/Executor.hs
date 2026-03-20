@@ -459,26 +459,65 @@ Column projection and predicate pushdown are forwarded to 'readParquetWithOpts'
 via 'ParquetReadOptions'.
 -}
 executeParquetScan :: FilePath -> ScanConfig -> IO Stream
-executeParquetScan path cfg = do
-    isDir <- doesDirectoryExist path
-    let pat = if isDir then path </> "*" else path
-    matches <- glob pat
-    files <- filterM (fmap not . doesDirectoryExist) matches
-    when (null files) $
-        error ("executeParquetScan: no parquet files found for " ++ path)
+executeParquetScan path cfg
+    | Parquet.isHFUri path = executeHFParquetScan path cfg
+    | otherwise = do
+        isDir <- doesDirectoryExist path
+        let pat = if isDir then path </> "*" else path
+        matches <- glob pat
+        files <- filterM (fmap not . doesDirectoryExist) matches
+        when (null files) $
+            error ("executeParquetScan: no parquet files found for " ++ path)
+        let opts =
+                Parquet.defaultParquetReadOptions
+                    { Parquet.selectedColumns = Just (M.keys (elements (scanSchema cfg)))
+                    , Parquet.predicate = scanPushdownPredicate cfg
+                    }
+        ref <- newIORef files
+        return . Stream $ do
+            fs <- readIORef ref
+            case fs of
+                [] -> return Nothing
+                (f : rest) -> do
+                    writeIORef ref rest
+                    Just <$> Parquet.readParquetWithOpts opts f
+
+{- | HuggingFace Parquet scan.  Files are resolved once (API call or direct URL)
+then downloaded one at a time as the stream is pulled — so only one file's worth
+of data is in memory at a time, regardless of dataset size.
+-}
+
+-- TODO: mchavinda - this should be a more general online file scanner.
+executeHFParquetScan :: FilePath -> ScanConfig -> IO Stream
+executeHFParquetScan path cfg = do
+    ref <- case Parquet.parseHFUri path of
+        Left err -> error err
+        Right r -> pure r
+    mToken <- Parquet.getHFToken
+    hfFiles <-
+        if Parquet.hasGlob (Parquet.hfGlob ref)
+            then Parquet.resolveHFUrls mToken ref
+            else do
+                let url = Parquet.directHFUrl ref
+                    filename = last $ T.splitOn "/" (Parquet.hfGlob ref)
+                pure [Parquet.HFParquetFile url "" "" filename]
+    when (null hfFiles) $
+        error ("executeParquetScan: no HF parquet files found for " ++ path)
     let opts =
             Parquet.defaultParquetReadOptions
                 { Parquet.selectedColumns = Just (M.keys (elements (scanSchema cfg)))
                 , Parquet.predicate = scanPushdownPredicate cfg
                 }
-    ref <- newIORef files
+    filesRef <- newIORef hfFiles
     return . Stream $ do
-        fs <- readIORef ref
+        fs <- readIORef filesRef
         case fs of
             [] -> return Nothing
             (f : rest) -> do
-                writeIORef ref rest
-                Just <$> Parquet.readParquetWithOpts opts f
+                writeIORef filesRef rest
+                -- Download a single file, read it, then return the batch.
+                [localPath] <- Parquet.downloadHFFiles mToken [f]
+                Just <$> Parquet.readParquetWithOpts opts localPath
 
 -- ---------------------------------------------------------------------------
 -- CSV scan implementation

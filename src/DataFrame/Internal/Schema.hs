@@ -96,3 +96,15 @@ newtype Schema = Schema
     -}
     }
     deriving (Show, Eq)
+
+{- | Construct a 'Schema' from a list of @(columnName, schemaType)@ pairs.
+
+==== __Example__
+>>> :set -XTypeApplications
+>>> import qualified Data.Text as T
+>>> let s = makeSchema [("name", schemaType @T.Text), ("age", schemaType @Int)]
+>>> M.member "age" (elements s)
+True
+-}
+makeSchema :: [(T.Text, SchemaType)] -> Schema
+makeSchema = Schema . M.fromList
