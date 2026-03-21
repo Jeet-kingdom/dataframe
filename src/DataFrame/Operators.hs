@@ -92,6 +92,13 @@ lift2Decorated f name rep comm prec =
             }
         )
 
+(.==.) ::
+    (Columnable a) =>
+    Expr a ->
+    Expr a ->
+    Expr Bool
+(.==.) = lift2Decorated (==) "eq" (Just ".==.") True 4
+
 -- Nullable-aware arithmetic operators
 
 {- | Nullable-aware addition. Works for all combinations of nullable\/non-nullable operands.

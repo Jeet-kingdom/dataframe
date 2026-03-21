@@ -804,3 +804,117 @@ findBestSplit = findBestGreedySplit @a
 
 pruneTree :: forall a. (Columnable a, Eq a) => Expr a -> Expr a
 pruneTree = pruneExpr
+
+-- | A tree where each leaf stores a class-probability distribution.
+type ProbTree a = Tree (M.Map a Double)
+
+-- | Compute normalised class probabilities from a subset of training rows.
+probsFromIndices ::
+    forall a.
+    (Columnable a) =>
+    T.Text ->
+    DataFrame ->
+    V.Vector Int ->
+    M.Map a Double
+probsFromIndices target df indices =
+    case interpret @a df (Col target) of
+        Left _ -> M.empty
+        Right (TColumn col) ->
+            case toVector @a col of
+                Left _ -> M.empty
+                Right vals ->
+                    let counts =
+                            V.foldl'
+                                (\acc i -> M.insertWith (+) (vals V.! i) 1 acc)
+                                M.empty
+                                indices
+                        total = fromIntegral (V.length indices) :: Double
+                     in M.map (\c -> fromIntegral c / total) counts
+
+{- | Annotate a fitted 'Tree a' with class distributions by routing the
+  training data through it.  The split conditions are preserved; only the
+  leaf values change from a majority label to a probability map.
+-}
+buildProbTree ::
+    forall a.
+    (Columnable a) =>
+    Tree a ->
+    T.Text ->
+    DataFrame ->
+    V.Vector Int ->
+    ProbTree a
+buildProbTree (Leaf _) target df indices =
+    Leaf (probsFromIndices @a target df indices)
+buildProbTree (Branch cond left right) target df indices =
+    let (indicesL, indicesR) = partitionIndices cond df indices
+     in Branch
+            cond
+            (buildProbTree @a left target df indicesL)
+            (buildProbTree @a right target df indicesR)
+
+{- | Fit a TAO decision tree and return one @Expr Double@ per class.
+
+  Each @(c, e)@ pair in the result map means: evaluate @e@ on a 'DataFrame'
+  row to get the predicted probability of class @c@.  You can insert these
+  as new columns with 'derive' or evaluate them with 'interpret'.
+
+  Example:
+  @
+  let pes = fitProbTree \@T.Text cfg (Col \"species\") trainDf
+  -- pes M.! \"setosa\" :: Expr Double
+  df' = M.foldlWithKey' (\\d cls e -> D.derive (cls <> \"_prob\") e d) testDf pes
+  @
+-}
+fitProbTree ::
+    forall a.
+    (Columnable a) =>
+    TreeConfig ->
+    Expr a -> -- target column, e.g. @Col \"label\"@
+    DataFrame ->
+    M.Map a (Expr Double)
+fitProbTree cfg (Col target) df =
+    let
+        conds =
+            nubOrd $
+                numericConditions cfg (exclude [target] df)
+                    ++ generateConditionsOld cfg (exclude [target] df)
+        initialTree = buildGreedyTree @a cfg (maxTreeDepth cfg) target conds df
+        indices = V.enumFromN 0 (nRows df)
+        optimizedTree = taoOptimize @a cfg target conds df indices initialTree
+        pruned = pruneDead optimizedTree
+     in
+        probExprs (buildProbTree @a pruned target df indices)
+fitProbTree _ expr _ =
+    error $ "Cannot create prob tree for compound expression: " ++ show expr
+
+{- | Convert a 'ProbTree' into one 'Expr Double' per class.
+
+  Each @(c, e)@ pair means: evaluate @e@ on a 'DataFrame' row to get the
+  predicted probability of class @c@.  You can insert these as new columns
+  with 'derive' or evaluate them with 'interpret'.
+
+  Example:
+  @
+  let pt  = fitProbTree \@T.Text cfg (Col \"species\") trainDf
+      pes = probExprs pt
+  -- pes M.! \"setosa\" :: Expr Double
+  df' = M.foldlWithKey' (\\d cls e -> D.derive (cls <> \"_prob\") e d) testDf pes
+  @
+-}
+probExprs ::
+    forall a.
+    (Columnable a) =>
+    ProbTree a ->
+    M.Map a (Expr Double)
+probExprs tree =
+    let classes = nubOrd (allClasses tree)
+     in M.fromList [(c, classExpr c tree) | c <- classes]
+  where
+    allClasses :: ProbTree a -> [a]
+    allClasses (Leaf m) = M.keys m
+    allClasses (Branch _ l r) = allClasses l ++ allClasses r
+
+    classExpr :: a -> ProbTree a -> Expr Double
+    classExpr c (Leaf m) = Lit (M.findWithDefault 0.0 c m)
+    classExpr c (Branch cond l r) =
+        F.ifThenElse cond (classExpr c l) (classExpr c r)

@@ -8,10 +8,13 @@ import qualified DataFrame as D
 import DataFrame.DecisionTree
 import qualified DataFrame.Functions as F
 import qualified DataFrame.Internal.Column as DI
-import DataFrame.Internal.Expression (Expr)
+import DataFrame.Internal.Expression (Expr (..))
+import DataFrame.Internal.Interpreter (interpret)
 import DataFrame.Operators
 
-import Data.List (sort)
+import Data.Function (on)
+import Data.List (maximumBy, sort)
+import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import Test.HUnit
@@ -560,6 +563,158 @@ numericExprsWithTermsMixedTest = TestCase $ do
         (any (\case NMaybeDouble _ -> True; _ -> False) exprs)
 
 ------------------------------------------------------------------------
+-- Probability tree tests
+------------------------------------------------------------------------
+
+-- probsFromIndices: counts correct on a 3-row slice
+probsFromIndicesBasic :: Test
+probsFromIndicesBasic = TestCase $ do
+    let df =
+            D.fromNamedColumns
+                [ ("label", DI.fromList (["A", "A", "B"] :: [T.Text]))
+                , ("x", DI.fromList ([1.0, 2.0, 3.0] :: [Double]))
+                ]
+        probs = probsFromIndices @T.Text "label" df (V.fromList [0, 1, 2])
+    assertBool "A prob ≈ 2/3" (abs (probs M.! "A" - 2 / 3) < 1e-9)
+    assertBool "B prob ≈ 1/3" (abs (probs M.! "B" - 1 / 3) < 1e-9)
+
+-- probsFromIndices: only a subset of rows counted
+probsFromIndicesSubset :: Test
+probsFromIndicesSubset = TestCase $ do
+    let df =
+            D.fromNamedColumns
+                [ ("label", DI.fromList (["A", "A", "B", "B"] :: [T.Text]))
+                , ("x", DI.fromList ([1.0, 2.0, 3.0, 4.0] :: [Double]))
+                ]
+        probs = probsFromIndices @T.Text "label" df (V.fromList [0, 1])
+    assertEqual "only rows 0,1 → A:1.0" (M.fromList [("A", 1.0)]) probs
+
+-- probsFromIndices: single class → probability 1.0
+probsFromIndicesSingleClass :: Test
+probsFromIndicesSingleClass = TestCase $ do
+    let probs = probsFromIndices @T.Text "label" fixtureDF (V.fromList [0, 2])
+    assertEqual "rows 0,2 both A → A:1.0" (M.fromList [("A", 1.0)]) probs
+
+-- buildProbTree: Leaf preserves distribution
+buildProbTreeLeaf :: Test
+buildProbTreeLeaf = TestCase $ do
+    let df =
+            D.fromNamedColumns
+                [ ("label", DI.fromList (["A", "A", "A"] :: [T.Text]))
+                , ("x", DI.fromList ([1.0, 2.0, 3.0] :: [Double]))
+                ]
+        pt = buildProbTree @T.Text (Leaf "A") "label" df (V.fromList [0, 1, 2])
+    case pt of
+        Leaf m -> assertEqual "pure-A leaf → {A:1.0}" (M.fromList [("A", 1.0)]) m
+        _ -> assertFailure "expected Leaf"
+
+-- buildProbTree: Branch distributes rows to left/right leaves correctly
+buildProbTreeBranch :: Test
+buildProbTreeBranch = TestCase $ do
+    -- splitCond: x <= 2.5 → idx 0,1 go left; idx 2,3 go right
+    -- left  (idx 0,1): labels ["A","B"] → {A:0.5, B:0.5}
+    -- right (idx 2,3): labels ["A","C"] → {A:0.5, C:0.5}
+    let stump = Branch splitCond (Leaf "A") (Leaf "B") :: Tree T.Text
+        pt = buildProbTree @T.Text stump "label" fixtureDF allIndices
+    case pt of
+        Branch _ (Leaf lm) (Leaf rm) -> do
+            assertBool "left leaf has A:0.5" (abs (M.findWithDefault 0 "A" lm - 0.5) < 1e-9)
+            assertBool "left leaf has B:0.5" (abs (M.findWithDefault 0 "B" lm - 0.5) < 1e-9)
+            assertBool
+                "right leaf has A:0.5"
+                (abs (M.findWithDefault 0 "A" rm - 0.5) < 1e-9)
+            assertBool
+                "right leaf has C:0.5"
+                (abs (M.findWithDefault 0 "C" rm - 0.5) < 1e-9)
+        _ -> assertFailure "expected Branch with two Leaves"
+
+-- probExprs: leaf tree produces Lit values
+probExprsLeaf :: Test
+probExprsLeaf = TestCase $ do
+    let pt = Leaf (M.fromList [("A", 0.75), ("B", 0.25)]) :: ProbTree T.Text
+        pe = probExprs pt
+    assertEqual "A expr is Lit 0.75" (Lit 0.75) (pe M.! "A")
+    assertEqual "B expr is Lit 0.25" (Lit 0.25) (pe M.! "B")
+
+-- probExprs: class absent from one leaf gets Lit 0.0 on that side
+probExprsMissingClass :: Test
+probExprsMissingClass = TestCase $ do
+    let pt =
+            Branch
+                splitCond
+                (Leaf (M.fromList [("A", 1.0)]))
+                (Leaf (M.fromList [("B", 1.0)])) ::
+                ProbTree T.Text
+        pe = probExprs pt
+    assertEqual
+        "A expr: If cond (Lit 1.0) (Lit 0.0)"
+        (F.ifThenElse splitCond (Lit 1.0) (Lit 0.0))
+        (pe M.! "A")
+    assertEqual
+        "B expr: If cond (Lit 0.0) (Lit 1.0)"
+        (F.ifThenElse splitCond (Lit 0.0) (Lit 1.0))
+        (pe M.! "B")
+
+-- probExprs: keys equal all classes that appear across any leaf
+probExprsAllClasses :: Test
+probExprsAllClasses = TestCase $ do
+    let pt =
+            Branch
+                splitCond
+                (Leaf (M.fromList [("A", 1.0)]))
+                (Leaf (M.fromList [("B", 0.6), ("C", 0.4)])) ::
+                ProbTree T.Text
+        pe = probExprs pt
+    assertEqual "three classes in result" (sort ["A", "B", "C"]) (sort (M.keys pe))
+
+-- Probabilities sum to 1.0 at every row after applying probExprs
+probsSumToOne :: Test
+probsSumToOne = TestCase $ do
+    let stump = Branch splitCond (Leaf "A") (Leaf "B") :: Tree T.Text
+        pt = buildProbTree @T.Text stump "label" fixtureDF allIndices
+        pe = probExprs pt
+        sumExpr = foldl1 (.+) (M.elems pe)
+    case interpret @Double fixtureDF sumExpr of
+        Left e -> assertFailure (show e)
+        Right (DI.TColumn col) ->
+            case DI.toVector @Double col of
+                Left e -> assertFailure (show e)
+                Right vals ->
+                    mapM_
+                        (\v -> assertBool ("sum ≈ 1.0, got " ++ show v) (abs (v - 1.0) < 1e-9))
+                        (V.toList vals)
+
+-- argmax of probExprs agrees with fitDecisionTree on sepDF
+probArgmaxMatchesClassifier :: Test
+probArgmaxMatchesClassifier = TestCase $ do
+    let cfg = defaultTreeConfig{taoIterations = 5, expressionPairs = 4, minLeafSize = 1}
+        hardExpr = fitDecisionTree @T.Text cfg (Col "label") sepDF
+        pe = fitProbTree @T.Text cfg (Col "label") sepDF
+        indices = [0 .. D.nRows sepDF - 1]
+    case interpret @T.Text sepDF hardExpr of
+        Left e -> assertFailure (show e)
+        Right (DI.TColumn hardCol) ->
+            case DI.toVector @T.Text hardCol of
+                Left e -> assertFailure (show e)
+                Right hardVals -> do
+                    probCols <-
+                        mapM
+                            ( \(cls, expr) -> case interpret @Double sepDF expr of
+                                Left e -> assertFailure (show e) >> return (cls, V.empty)
+                                Right (DI.TColumn col) -> case DI.toVector @Double col of
+                                    Left e -> assertFailure (show e) >> return (cls, V.empty)
+                                    Right v -> return (cls, v)
+                            )
+                            (M.toList pe)
+                    mapM_
+                        ( \i ->
+                            let argmax = fst $ maximumBy (compare `on` (V.! i) . snd) probCols
+                                hard = hardVals V.! i
+                             in assertEqual ("row " ++ show i) hard argmax
+                        )
+                        indices
+
+------------------------------------------------------------------------
 -- Test list
 ------------------------------------------------------------------------
 
@@ -596,4 +751,14 @@ tests =
     , TestLabel "nullableFitZeroLoss" nullableFitZeroLossTest
     , TestLabel "nullableFitWithNullsNoCrash" nullableFitWithNullsNoCrashTest
     , TestLabel "numericExprsWithTermsMixed" numericExprsWithTermsMixedTest
+    , TestLabel "probsFromIndicesBasic" probsFromIndicesBasic
+    , TestLabel "probsFromIndicesSubset" probsFromIndicesSubset
+    , TestLabel "probsFromIndicesSingleClass" probsFromIndicesSingleClass
+    , TestLabel "buildProbTreeLeaf" buildProbTreeLeaf
+    , TestLabel "buildProbTreeBranch" buildProbTreeBranch
+    , TestLabel "probExprsLeaf" probExprsLeaf
+    , TestLabel "probExprsMissingClass" probExprsMissingClass
+    , TestLabel "probExprsAllClasses" probExprsAllClasses
+    , TestLabel "probsSumToOne" probsSumToOne
+    , TestLabel "probArgmaxMatchesClassifier" probArgmaxMatchesClassifier
     ]
