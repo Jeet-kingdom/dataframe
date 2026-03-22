@@ -581,7 +581,7 @@ foldl1DirectGroups ::
     VU.Vector Int ->
     Either DataFrameException Column
 foldl1DirectGroups f col valueIndices offsets
-    | VU.length offsets <= 1 = pure $ BoxedColumn @T.Text VB.empty
+    | VU.length offsets <= 1 = pure $ fromVector @a VB.empty
     | otherwise = case col of
         UnboxedColumn (vec :: VU.Vector d) -> UnboxedColumn <$> foldl1Worker vec
         BoxedColumn (vec :: VB.Vector d) -> BoxedColumn <$> foldl1Worker vec
