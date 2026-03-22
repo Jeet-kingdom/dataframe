@@ -105,15 +105,13 @@ isNumeric _ = False
 
 -- | Checks if a column is of a given type values.
 hasElemType :: forall a. (Columnable a) => Column -> Bool
-hasElemType (BoxedColumn (column :: VB.Vector b)) = fromMaybe False $ do
-    Refl <- testEquality (typeRep @a) (typeRep @b)
-    pure True
-hasElemType (UnboxedColumn (column :: VU.Vector b)) = fromMaybe False $ do
-    Refl <- testEquality (typeRep @a) (typeRep @b)
-    pure True
-hasElemType (OptionalColumn (column :: VB.Vector b)) = fromMaybe False $ do
-    Refl <- testEquality (typeRep @a) (typeRep @b)
-    pure True
+hasElemType = \case
+    BoxedColumn (column :: VB.Vector b) -> check (typeRep @b)
+    UnboxedColumn (column :: VU.Vector b) -> check (typeRep @b)
+    OptionalColumn (column :: VB.Vector b) -> check (typeRep @b)
+  where
+    check :: forall (b :: Type). TypeRep b -> Bool
+    check = isJust . testEquality (typeRep @a)
 
 -- | An internal/debugging function to get the column type of a column.
 columnVersionString :: Column -> String
@@ -532,42 +530,28 @@ foldl1Column ::
     forall a.
     (Columnable a) =>
     (a -> a -> a) -> Column -> Either DataFrameException a
-foldl1Column f c@(BoxedColumn (column :: VB.Vector d)) = case testEquality (typeRep @a) (typeRep @d) of
-    Just Refl -> pure $ VG.foldl1' f column
-    Nothing ->
-        Left $
-            TypeMismatchException
-                ( MkTypeErrorContext
-                    { userType = Right (typeRep @a)
-                    , expectedType = Right (typeRep @d)
-                    , callingFunctionName = Just "foldl1Column"
-                    , errorColumnName = Nothing
-                    }
-                )
-foldl1Column f c@(OptionalColumn (column :: VB.Vector d)) = case testEquality (typeRep @a) (typeRep @d) of
-    Just Refl -> pure $ VG.foldl1' f column
-    Nothing ->
-        Left $
-            TypeMismatchException
-                ( MkTypeErrorContext
-                    { userType = Right (typeRep @a)
-                    , expectedType = Right (typeRep @d)
-                    , callingFunctionName = Just "foldl1Column"
-                    , errorColumnName = Nothing
-                    }
-                )
-foldl1Column f c@(UnboxedColumn (column :: VU.Vector d)) = case testEquality (typeRep @a) (typeRep @d) of
-    Just Refl -> pure $ VG.foldl1' f column
-    Nothing ->
-        Left $
-            TypeMismatchException
-                ( MkTypeErrorContext
-                    { userType = Right (typeRep @a)
-                    , expectedType = Right (typeRep @d)
-                    , callingFunctionName = Just "foldl1Column"
-                    , errorColumnName = Nothing
-                    }
-                )
+foldl1Column f = \case
+    BoxedColumn column -> foldl1Worker column
+    UnboxedColumn column -> foldl1Worker column
+    OptionalColumn column -> foldl1Worker column
+  where
+    foldl1Worker ::
+        forall c v.
+        (Typeable c, VG.Vector v c) =>
+        v c ->
+        Either DataFrameException a
+    foldl1Worker vec = case testEquality (typeRep @a) (typeRep @c) of
+        Just Refl -> pure $ VG.foldl1' f vec
+        Nothing ->
+            Left $
+                TypeMismatchException
+                    ( MkTypeErrorContext
+                        { userType = Right (typeRep @a)
+                        , expectedType = Right (typeRep @c)
+                        , callingFunctionName = Just "foldl1Column"
+                        , errorColumnName = Nothing
+                        }
+                    )
 
 {- | O(n) Seedless fold over groups using the first element of each group as seed.
 Like 'foldDirectGroups' but for the case where no initial accumulator is available.
@@ -685,51 +669,31 @@ foldLinearGroups f seed col rowToGroup nGroups
 {-# INLINEABLE foldLinearGroups #-}
 
 headColumn :: forall a. (Columnable a) => Column -> Either DataFrameException a
-headColumn (BoxedColumn (col :: VB.Vector b)) = case testEquality (typeRep @a) (typeRep @b) of
-    Just Refl ->
-        if VG.null col
-            then Left (EmptyDataSetException "headColumn")
-            else pure (VG.head col)
-    Nothing ->
-        Left $
-            TypeMismatchException
-                ( MkTypeErrorContext
-                    { userType = Right (typeRep @a)
-                    , expectedType = Right (typeRep @b)
-                    , callingFunctionName = Just "headColumn"
-                    , errorColumnName = Nothing
-                    }
-                )
-headColumn (UnboxedColumn (col :: VU.Vector b)) = case testEquality (typeRep @a) (typeRep @b) of
-    Just Refl ->
-        if VG.null col
-            then Left (EmptyDataSetException "headColumn")
-            else pure (VG.head col)
-    Nothing ->
-        Left $
-            TypeMismatchException
-                ( MkTypeErrorContext
-                    { userType = Right (typeRep @a)
-                    , expectedType = Right (typeRep @b)
-                    , callingFunctionName = Just "headColumn"
-                    , errorColumnName = Nothing
-                    }
-                )
-headColumn (OptionalColumn (col :: VB.Vector b)) = case testEquality (typeRep @a) (typeRep @b) of
-    Just Refl ->
-        if VG.null col
-            then Left (EmptyDataSetException "headColumn")
-            else pure (VG.head col)
-    Nothing ->
-        Left $
-            TypeMismatchException
-                ( MkTypeErrorContext
-                    { userType = Right (typeRep @a)
-                    , expectedType = Right (typeRep @b)
-                    , callingFunctionName = Just "headColumn"
-                    , errorColumnName = Nothing
-                    }
-                )
+headColumn = \case
+    BoxedColumn col -> headWorker col
+    UnboxedColumn col -> headWorker col
+    OptionalColumn col -> headWorker col
+  where
+    headWorker ::
+        forall c v.
+        (Typeable c, VG.Vector v c) =>
+        v c ->
+        Either DataFrameException a
+    headWorker vec = case testEquality (typeRep @a) (typeRep @c) of
+        Just Refl ->
+            if VG.null vec
+                then Left (EmptyDataSetException "headColumn")
+                else pure (VG.head vec)
+        Nothing ->
+            Left $
+                TypeMismatchException
+                    ( MkTypeErrorContext
+                        { userType = Right (typeRep @a)
+                        , expectedType = Right (typeRep @c)
+                        , callingFunctionName = Just "headColumn"
+                        , errorColumnName = Nothing
+                        }
+                    )
 
 -- | An internal, column version of zip.
 zipColumns :: Column -> Column -> Column
@@ -941,52 +905,31 @@ leftExpandColumn n column@(UnboxedColumn col)
 Returns Nothing if the columns are of different types.
 -}
 concatColumns :: Column -> Column -> Either DataFrameException Column
-concatColumns (OptionalColumn left) (OptionalColumn right) = case testEquality (typeOf left) (typeOf right) of
-    Just Refl -> pure (OptionalColumn $ left <> right)
-    Nothing ->
-        Left $
-            TypeMismatchException
-                ( MkTypeErrorContext
-                    { userType = Right (typeOf right)
-                    , expectedType = Right (typeOf left)
-                    , callingFunctionName = Just "concatColumns"
-                    , errorColumnName = Nothing
-                    }
-                )
-concatColumns (BoxedColumn left) (BoxedColumn right) = case testEquality (typeOf left) (typeOf right) of
-    Just Refl -> pure (BoxedColumn $ left <> right)
-    Nothing ->
-        Left $
-            TypeMismatchException
-                ( MkTypeErrorContext
-                    { userType = Right (typeOf right)
-                    , expectedType = Right (typeOf left)
-                    , callingFunctionName = Just "concatColumns"
-                    , errorColumnName = Nothing
-                    }
-                )
-concatColumns (UnboxedColumn left) (UnboxedColumn right) = case testEquality (typeOf left) (typeOf right) of
-    Just Refl -> pure (UnboxedColumn $ left <> right)
-    Nothing ->
-        Left $
-            TypeMismatchException
-                ( MkTypeErrorContext
-                    { userType = Right (typeOf right)
-                    , expectedType = Right (typeOf left)
-                    , callingFunctionName = Just "concatColumns"
-                    , errorColumnName = Nothing
-                    }
-                )
-concatColumns left right =
-    Left $
-        TypeMismatchException
-            ( MkTypeErrorContext
-                { userType = Right (typeOf right)
-                , expectedType = Right (typeOf left)
-                , callingFunctionName = Just "concatColumns"
-                , errorColumnName = Nothing
-                }
-            )
+concatColumns left right = case (left, right) of
+    (OptionalColumn l, OptionalColumn r) -> case testEquality (typeOf l) (typeOf r) of
+        Just Refl -> pure (OptionalColumn $ l <> r)
+        Nothing -> Left (mismatchErr (typeOf r) (typeOf l))
+    (BoxedColumn l, BoxedColumn r) -> case testEquality (typeOf l) (typeOf r) of
+        Just Refl -> pure (BoxedColumn $ l <> r)
+        Nothing -> Left (mismatchErr (typeOf r) (typeOf l))
+    (UnboxedColumn l, UnboxedColumn r) -> case testEquality (typeOf l) (typeOf r) of
+        Just Refl -> pure (UnboxedColumn $ l <> r)
+        Nothing -> Left (mismatchErr (typeOf r) (typeOf l))
+    _ -> Left (mismatchErr (typeOf right) (typeOf left))
+  where
+    mismatchErr ::
+        forall (x :: Type) (y :: Type). TypeRep x -> TypeRep y -> DataFrameException
+    mismatchErr ta tb =
+        withTypeable ta $
+            withTypeable tb $
+                TypeMismatchException
+                    ( MkTypeErrorContext
+                        { userType = Right ta
+                        , expectedType = Right tb
+                        , callingFunctionName = Just "concatColumns"
+                        , errorColumnName = Nothing
+                        }
+                    )
 
 {- | Concatenates two columns.
 
@@ -1144,41 +1087,24 @@ For numeric conversions with automatic type coercion, see 'toDoubleVector',
 toVector ::
     forall a v.
     (VG.Vector v a, Columnable a) => Column -> Either DataFrameException (v a)
-toVector column@(OptionalColumn (col :: VB.Vector b)) =
-    case testEquality (typeRep @a) (typeRep @b) of
-        Just Refl -> Right $ VG.convert col
+toVector = \case
+    OptionalColumn col -> toVectorWorker col
+    BoxedColumn col -> toVectorWorker col
+    UnboxedColumn col -> toVectorWorker col
+  where
+    toVectorWorker ::
+        forall c w.
+        (Typeable c, VG.Vector w c) =>
+        w c ->
+        Either DataFrameException (v a)
+    toVectorWorker vec = case testEquality (typeRep @a) (typeRep @c) of
+        Just Refl -> Right $ VG.convert vec
         Nothing ->
             Left $
                 TypeMismatchException
                     ( MkTypeErrorContext
                         { userType = Right (typeRep @a)
-                        , expectedType = Right (typeRep @b)
-                        , callingFunctionName = Just "toVector"
-                        , errorColumnName = Nothing
-                        }
-                    )
-toVector (BoxedColumn (col :: VB.Vector b)) =
-    case testEquality (typeRep @a) (typeRep @b) of
-        Just Refl -> Right $ VG.convert col
-        Nothing ->
-            Left $
-                TypeMismatchException
-                    ( MkTypeErrorContext
-                        { userType = Right (typeRep @a)
-                        , expectedType = Right (typeRep @b)
-                        , callingFunctionName = Just "toVector"
-                        , errorColumnName = Nothing
-                        }
-                    )
-toVector (UnboxedColumn (col :: VU.Vector b)) =
-    case testEquality (typeRep @a) (typeRep @b) of
-        Just Refl -> Right $ VG.convert col
-        Nothing ->
-            Left $
-                TypeMismatchException
-                    ( MkTypeErrorContext
-                        { userType = Right (typeRep @a)
-                        , expectedType = Right (typeRep @b)
+                        , expectedType = Right (typeRep @c)
                         , callingFunctionName = Just "toVector"
                         , errorColumnName = Nothing
                         }
