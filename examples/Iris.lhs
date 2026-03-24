@@ -26,6 +26,7 @@ Think of these like compiler flags in C++ or decorator syntax in Python:
 > {-# LANGUAGE OverloadedStrings #-}
 > {-# LANGUAGE RecordWildCards #-}
 > {-# LANGUAGE TypeApplications #-}
+> {-# LANGUAGE DeriveAnyClass #-}
 >
 > module Iris (run) where
 
@@ -45,6 +46,8 @@ in Python or `#include` in C++:
 > import qualified Data.Text as T
 > import qualified Data.Vector as V
 > import qualified Data.Vector.Unboxed as VU
+> import Control.DeepSeq
+> import GHC.Generics
 
 DataFrame is a Haskell library similar to pandas in Python:
 
@@ -71,7 +74,7 @@ as an algebraic data type (similar to an enum in other languages):
 >     = Setosa
 >     | Versicolor
 >     | Virginica
->     deriving (Eq, Show, Read, Ord, Enum)
+>     deriving (Eq, Show, Read, Ord, Enum, Generic, NFData)
 
 The `deriving` clause automatically generates useful functions:
 - `Eq`: Allows us to compare Iris values for equality

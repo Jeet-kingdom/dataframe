@@ -38,6 +38,10 @@ library
     build-depends:    base >= 4.11 && < 5,
                       vector ^>= 0.13,
                       dataframe ^>= 1,
+    if impl(ghc >= 9.12)
+      build-depends: ghc-typelits-natnormalise == 0.9.3
+    else
+      build-depends: ghc-typelits-natnormalise >= 0.7.7 && < 0.9
                       hasktorch >= 0.2.1.6 && < 0.3
 
     hs-source-dirs:   src
