@@ -146,9 +146,8 @@ library
                       filepath >= 1.4 && < 2,
                       Glob >= 0.10 && < 1,
                       http-conduit >= 2.3 && < 3,
-                      streamly-core >= 0.2.3 && < 0.3,
-                      streamly-bytestring >= 0.3.0 < 0.4,
-
+                      streamly-core >= 0.2.3 && < 0.4,
+                      streamly-bytestring >= 0.2.0 && < 0.4
     hs-source-dirs:   src
     c-sources:        cbits/process_csv.c
     include-dirs:     cbits
