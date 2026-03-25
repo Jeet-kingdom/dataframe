@@ -13,7 +13,6 @@
 
 module DataFrame.Internal.Expression where
 
-import Control.DeepSeq (NFData (..))
 import Data.String
 import qualified Data.Text as T
 import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
@@ -37,9 +36,6 @@ data BinaryOp a b c = MkBinaryOp
 
 data MeanAcc = MeanAcc {-# UNPACK #-} !Double {-# UNPACK #-} !Int
     deriving (Show, Eq, Ord, Read)
-
-instance NFData MeanAcc where
-    rnf (MeanAcc _ _) = ()
 
 data AggStrategy a b where
     CollectAgg ::

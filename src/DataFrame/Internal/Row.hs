@@ -17,7 +17,6 @@ import qualified Data.Vector.Algorithms.Merge as VA
 import qualified Data.Vector.Generic as VG
 import qualified Data.Vector.Unboxed as VU
 
-import Control.DeepSeq (NFData (..))
 import Control.Exception (throw)
 import Control.Monad.ST (runST)
 import Data.Function (on)
@@ -57,9 +56,6 @@ instance Ord Any where
 instance Show Any where
     show :: Any -> String
     show (Value a) = T.unpack (showValue a)
-
-instance NFData Any where
-    rnf (Value a) = rnf a
 
 showValue :: forall a. (Columnable a) => a -> T.Text
 showValue v = case testEquality (typeRep @a) (typeRep @T.Text) of

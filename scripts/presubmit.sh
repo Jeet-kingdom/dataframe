@@ -8,10 +8,6 @@ set -e
 cabal build
 cabal test
 
-cd examples
-
-cabal build all
-
 cd ../dataframe-persistent
 
 cabal build
@@ -19,3 +15,7 @@ cabal build
 cd ../dataframe-hasktorch
 
 cabal build
+
+cd examples
+
+cabal build all

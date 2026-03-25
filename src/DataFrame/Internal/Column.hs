@@ -134,9 +134,9 @@ instance (Show a) => Show (TypedColumn a) where
     show (TColumn col) = show col
 
 instance NFData Column where
-    rnf (BoxedColumn (v :: VB.Vector a)) = rnf v
+    rnf (BoxedColumn (v :: VB.Vector a)) = VB.foldl' (const (`seq` ())) () v
     rnf (UnboxedColumn v) = v `seq` ()
-    rnf (OptionalColumn (v :: VB.Vector (Maybe a))) = rnf v
+    rnf (OptionalColumn (v :: VB.Vector (Maybe a))) = VB.foldl' (const (`seq` ())) () v
 
 instance Show Column where
     show :: Column -> String

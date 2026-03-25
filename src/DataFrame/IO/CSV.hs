@@ -27,6 +27,7 @@ import qualified Data.Vector.Unboxed.Mutable as VUM
 import Data.Csv.Streaming (Records (..))
 import qualified Data.Csv.Streaming as CsvStream
 
+import Control.DeepSeq
 import Control.Monad
 import Data.Char
 import qualified Data.Csv as Csv
@@ -272,7 +273,7 @@ readSeparated :: ReadOptions -> FilePath -> IO DataFrame
 readSeparated opts !path = do
     let stripUtf8Bom bs = fromMaybe bs (BL.stripPrefix "\xEF\xBB\xBF" bs)
     csvData <- stripUtf8Bom <$> BL.readFile path
-    decodeSeparated opts csvData
+    fmap force (decodeSeparated opts csvData)
 
 decodeSeparated :: ReadOptions -> BL.ByteString -> IO DataFrame
 decodeSeparated !opts csvData = do
