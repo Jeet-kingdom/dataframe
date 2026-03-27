@@ -1,3 +1,4 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
@@ -23,7 +24,7 @@ import DataFrame.Errors
 import DataFrame.Internal.Column
 import DataFrame.Internal.Expression
 import Text.Printf
-import Type.Reflection (typeRep)
+import Type.Reflection (Typeable, typeRep)
 import Prelude hiding (null)
 
 data DataFrame = DataFrame
@@ -110,17 +111,34 @@ asText d properMarkdown =
     let header = map fst (sortBy (compare `on` snd) $ M.toList (columnIndices d))
         types = V.toList $ V.filter (/= "") $ V.map getType (columns d)
         getType :: Column -> T.Text
-        getType (BoxedColumn _ (column :: V.Vector a)) = T.pack $ show (typeRep @a)
-        getType (UnboxedColumn _ (column :: VU.Vector a)) = T.pack $ show (typeRep @a)
+        showMaybeType :: forall a. (Typeable a) => String
+        showMaybeType =
+            let s = show (typeRep @a)
+             in "Maybe " <> if ' ' `elem` s then "(" <> s <> ")" else s
+        getType (BoxedColumn Nothing (_ :: V.Vector a)) = T.pack $ show (typeRep @a)
+        getType (BoxedColumn (Just _) (_ :: V.Vector a)) = T.pack $ showMaybeType @a
+        getType (UnboxedColumn Nothing (_ :: VU.Vector a)) = T.pack $ show (typeRep @a)
+        getType (UnboxedColumn (Just _) (_ :: VU.Vector a)) = T.pack $ showMaybeType @a
         -- Separate out cases dynamically so we don't end up making round trip string
         -- copies.
         get :: Maybe Column -> V.Vector T.Text
-        get (Just (BoxedColumn _ (column :: V.Vector a))) = case testEquality (typeRep @a) (typeRep @T.Text) of
+        get (Just (BoxedColumn (Just bm) (column :: V.Vector a))) =
+            V.generate (V.length column) $ \i ->
+                if bitmapTestBit bm i
+                    then T.pack (show (Just (V.unsafeIndex column i)))
+                    else "Nothing"
+        get (Just (BoxedColumn Nothing (column :: V.Vector a))) = case testEquality (typeRep @a) (typeRep @T.Text) of
             Just Refl -> column
             Nothing -> case testEquality (typeRep @a) (typeRep @String) of
                 Just Refl -> V.map T.pack column
                 Nothing -> V.map (T.pack . show) column
-        get (Just (UnboxedColumn _ column)) = V.map (T.pack . show) (V.convert column)
+        get (Just (UnboxedColumn (Just bm) column)) =
+            let col = V.convert column
+             in V.generate (V.length col) $ \i ->
+                    if bitmapTestBit bm i
+                        then T.pack (show (Just (V.unsafeIndex col i)))
+                        else "Nothing"
+        get (Just (UnboxedColumn Nothing column)) = V.map (T.pack . show) (V.convert column)
         get Nothing = V.empty
         getTextColumnFromFrame df (i, name) = get $ (V.!?) (columns d) ((M.!) (columnIndices d) name)
         rows =

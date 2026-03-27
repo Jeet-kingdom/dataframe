@@ -11,11 +11,15 @@ import qualified Data.Vector as V
 
 import Control.Applicative (asum)
 import Control.Monad (join)
-import Data.Maybe (fromMaybe)
 import qualified Data.Proxy as P
 import Data.Time
 import Data.Type.Equality (TestEquality (..))
-import DataFrame.Internal.Column (Column (..), bitmapTestBit, ensureOptional, fromVector)
+import DataFrame.Internal.Column (
+    Column (..),
+    bitmapTestBit,
+    ensureOptional,
+    fromVector,
+ )
 import DataFrame.Internal.DataFrame (DataFrame (..), unsafeGetColumn)
 import DataFrame.Internal.Parsing
 import DataFrame.Internal.Schema
@@ -65,9 +69,12 @@ parseDefault opts (BoxedColumn (Just bm) (c :: V.Vector a)) =
     case (typeRep @a) `testEquality` (typeRep @T.Text) of
         Nothing -> case (typeRep @a) `testEquality` (typeRep @String) of
             Just Refl ->
-                parseFromExamples opts (V.imap (\i x -> if bitmapTestBit bm i then T.pack x else "") c)
+                parseFromExamples
+                    opts
+                    (V.imap (\i x -> if bitmapTestBit bm i then T.pack x else "") c)
             Nothing -> BoxedColumn (Just bm) c
-        Just Refl -> parseFromExamples opts (V.imap (\i x -> if bitmapTestBit bm i then x else "") c)
+        Just Refl ->
+            parseFromExamples opts (V.imap (\i x -> if bitmapTestBit bm i then x else "") c)
 parseDefault _ column = column
 
 parseFromExamples :: ParseOptions -> V.Vector T.Text -> Column

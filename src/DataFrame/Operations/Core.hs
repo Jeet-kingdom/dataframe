@@ -25,7 +25,6 @@ import Data.Maybe
 import Data.Type.Equality (TestEquality (..))
 import DataFrame.Errors
 import DataFrame.Internal.Column (
-    Bitmap,
     Column (..),
     Columnable,
     TypedColumn (..),
@@ -536,7 +535,7 @@ describeColumns df =
         let
             cname = columnName i
             countNulls = nulls col
-            columnType = T.pack $ show $ typeRep @a
+            columnType = T.pack $ columnTypeString col
          in
             if isNothing cname
                 then acc
@@ -556,7 +555,12 @@ describeColumns df =
             if isNothing cname
                 then acc
                 else
-                    ColumnInfo (fromMaybe "" cname) (columnLength col - countNulls) countNulls columnType : acc
+                    ColumnInfo
+                        (fromMaybe "" cname)
+                        (columnLength col - countNulls)
+                        countNulls
+                        columnType
+                        : acc
 
 nulls :: Column -> Int
 nulls (BoxedColumn (Just bm) xs) =

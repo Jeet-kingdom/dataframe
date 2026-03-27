@@ -31,7 +31,8 @@ deriveWAI =
         ( assertEqual
             "derive works with column expression"
             ( Just $
-                DI.BoxedColumn Nothing
+                DI.BoxedColumn
+                    Nothing
                     (V.fromList (zipWith (\n c -> show n ++ [c]) [1 .. 26] ['a' .. 'z']))
             )
             ( DI.getColumn "test4" $

@@ -28,9 +28,17 @@ import qualified Data.Vector.Unboxed.Mutable as VUM
 
 import Control.DeepSeq (NFData (..), rnf)
 import Control.Exception (throw)
-import Control.Monad (forM_)
+import Control.Monad (forM_, when)
 import Control.Monad.ST (runST)
-import Data.Bits ((.&.), (.|.), complement, popCount, setBit, shiftL, shiftR, testBit, xor)
+import Data.Bits (
+    complement,
+    popCount,
+    setBit,
+    shiftL,
+    shiftR,
+    testBit,
+    (.&.),
+ )
 import Data.Kind (Type)
 import Data.Maybe
 import Data.These
@@ -53,7 +61,8 @@ kinds of vectors. Nullability is represented via an optional bit-packed 'Bitmap'
 -}
 data Column where
     BoxedColumn :: (Columnable a) => Maybe Bitmap -> VB.Vector a -> Column
-    UnboxedColumn :: (Columnable a, VU.Unbox a) => Maybe Bitmap -> VU.Vector a -> Column
+    UnboxedColumn ::
+        (Columnable a, VU.Unbox a) => Maybe Bitmap -> VU.Vector a -> Column
 
 {- | A mutable companion struct to dataframe columns.
 
@@ -82,8 +91,9 @@ allValidBitmap n =
      in if bytes == 0 then VU.empty else VU.snoc full lastByte
 {-# INLINE allValidBitmap #-}
 
--- | Build a bitmap from a @VU.Vector Word8@ validity vector
--- (1 = valid, 0 = null), as produced by Arrow / Parquet decoders.
+{- | Build a bitmap from a @VU.Vector Word8@ validity vector
+(1 = valid, 0 = null), as produced by Arrow / Parquet decoders.
+-}
 buildBitmapFromValid :: VU.Vector Word8 -> Bitmap
 buildBitmapFromValid valid =
     let n = VU.length valid
@@ -97,12 +107,12 @@ buildBitmapFromValid valid =
                             else acc
              in foldl setBitIf (0 :: Word8) [0 .. 7]
 
--- | Build a bitmap from a list of null-row indices.
--- @nullIdxs@ are the positions that are NULL.
+{- | Build a bitmap from a list of null-row indices.
+@nullIdxs@ are the positions that are NULL.
+-}
 buildBitmapFromNulls :: Int -> [Int] -> Bitmap
 buildBitmapFromNulls n nullIdxs =
-    let bytes = (n + 7) `shiftR` 3
-        base = VU.replicate bytes (0xFF :: Word8)
+    let base = allValidBitmap n
      in VU.modify
             ( \mv ->
                 forM_ nullIdxs $ \i -> do
@@ -120,15 +130,16 @@ buildBitmapFromNulls n nullIdxs =
 bitmapSlice :: Int -> Int -> Bitmap -> Bitmap
 bitmapSlice start len bm
     | start .&. 7 == 0 =
-        -- byte-aligned: simple slice
+        -- byte-aligned: simple slice; clamp so we never ask for more bytes than exist
         let startByte = start `shiftR` 3
-            bytes = (len + 7) `shiftR` 3
+            bytes = min ((len + 7) `shiftR` 3) (VU.length bm - startByte)
          in VU.slice startByte bytes bm
     | otherwise =
         -- non-aligned: unpack bit-by-bit and repack
         let n = min len (VU.length bm `shiftL` 3 - start)
          in buildBitmapFromValid $
-                VU.generate n $ \i -> if bitmapTestBit bm (start + i) then 1 else 0
+                VU.generate n $
+                    \i -> if bitmapTestBit bm (start + i) then 1 else 0
 
 -- | Concatenate two bitmaps covering @n1@ and @n2@ rows respectively.
 bitmapConcat :: Int -> Bitmap -> Int -> Bitmap -> Bitmap
@@ -143,11 +154,12 @@ bitmapConcat n1 bm1 n2 bm2 =
 mergeBitmaps :: Bitmap -> Bitmap -> Bitmap
 mergeBitmaps = VU.zipWith (.&.)
 
--- | Materialize a nullable column from @VB.Vector (Maybe a)@.
--- When @a@ is unboxable, creates an 'UnboxedColumn' (more compact).
--- Otherwise creates a 'BoxedColumn'.
--- Always attaches a bitmap so the column is recognized as nullable even when
--- no 'Nothing' values are present (preserves the Maybe type marker).
+{- | Materialize a nullable column from @VB.Vector (Maybe a)@.
+When @a@ is unboxable, creates an 'UnboxedColumn' (more compact).
+Otherwise creates a 'BoxedColumn'.
+Always attaches a bitmap so the column is recognized as nullable even when
+no 'Nothing' values are present (preserves the Maybe type marker).
+-}
 fromMaybeVec :: forall a. (Columnable a) => VB.Vector (Maybe a) -> Column
 fromMaybeVec v = case sUnbox @a of
     STrue -> fromMaybeVecUnboxed v
@@ -158,19 +170,19 @@ fromMaybeVec v = case sUnbox @a of
             dat = VB.map (fromMaybe (errorWithoutStackTrace "fromMaybeVec: Nothing slot")) v
          in BoxedColumn (Just bm) dat
 
--- | Materialize a nullable 'UnboxedColumn' to @VB.Vector (Maybe a)@ using runST.
--- Always attaches a bitmap so the column is recognized as nullable even when
--- no 'Nothing' values are present (preserves the Maybe type marker).
-fromMaybeVecUnboxed :: forall a. (Columnable a, VU.Unbox a) => VB.Vector (Maybe a) -> Column
+{- | Materialize a nullable 'UnboxedColumn' to @VB.Vector (Maybe a)@ using runST.
+Always attaches a bitmap so the column is recognized as nullable even when
+no 'Nothing' values are present (preserves the Maybe type marker).
+-}
+fromMaybeVecUnboxed ::
+    forall a. (Columnable a, VU.Unbox a) => VB.Vector (Maybe a) -> Column
 fromMaybeVecUnboxed v =
     let n = VB.length v
         nullIdxs = [i | i <- [0 .. n - 1], isNothing (VB.unsafeIndex v i)]
         bm = if null nullIdxs then allValidBitmap n else buildBitmapFromNulls n nullIdxs
         dat = runST $ do
             mv <- VUM.new n
-            VG.iforM_ v $ \i mx -> case mx of
-                Just x -> VUM.unsafeWrite mv i x
-                Nothing -> return ()
+            VG.iforM_ v $ \i mx -> forM_ mx (VUM.unsafeWrite mv i)
             VU.unsafeFreeze mv
      in UnboxedColumn (Just bm) dat
 
@@ -235,9 +247,10 @@ isNumeric (BoxedColumn _ (vec :: VB.Vector a)) = case testEquality (typeRep @a) 
     Nothing -> False
     Just Refl -> True
 
--- | Checks if a column is of a given type values.
--- For nullable columns (@BoxedColumn (Just _)@ or @UnboxedColumn (Just _)@),
--- also returns @True@ when @a = Maybe b@ and the column stores @b@ internally.
+{- | Checks if a column is of a given type values.
+For nullable columns (@BoxedColumn (Just _)@ or @UnboxedColumn (Just _)@),
+also returns @True@ when @a = Maybe b@ and the column stores @b@ internally.
+-}
 hasElemType :: forall a. (Columnable a) => Column -> Bool
 hasElemType = \case
     BoxedColumn bm (column :: VB.Vector b) -> checkBoxed bm (typeRep @b)
@@ -271,8 +284,15 @@ of a column.
 -}
 columnTypeString :: Column -> String
 columnTypeString column = case column of
-    BoxedColumn _ (column :: VB.Vector a) -> show (typeRep @a)
-    UnboxedColumn _ (column :: VU.Vector a) -> show (typeRep @a)
+    BoxedColumn Nothing (_ :: VB.Vector a) -> show (typeRep @a)
+    BoxedColumn (Just _) (_ :: VB.Vector a) -> showMaybeType @a
+    UnboxedColumn Nothing (_ :: VU.Vector a) -> show (typeRep @a)
+    UnboxedColumn (Just _) (_ :: VU.Vector a) -> showMaybeType @a
+  where
+    showMaybeType :: forall a. (Typeable a) => String
+    showMaybeType =
+        let s = show (typeRep @a)
+         in "Maybe " ++ if ' ' `elem` s then "(" ++ s ++ ")" else s
 
 instance (Show a) => Show (TypedColumn a) where
     show :: (Show a) => TypedColumn a -> String
@@ -282,9 +302,10 @@ instance NFData Column where
     rnf (BoxedColumn Nothing (v :: VB.Vector a)) = VB.foldl' (const (`seq` ())) () v
     rnf (BoxedColumn (Just bm) (v :: VB.Vector a)) =
         let n = VB.length v
-            go !i | i >= n = ()
-                  | bitmapTestBit bm i = VB.unsafeIndex v i `seq` go (i + 1)
-                  | otherwise = go (i + 1)
+            go !i
+                | i >= n = ()
+                | bitmapTestBit bm i = VB.unsafeIndex v i `seq` go (i + 1)
+                | otherwise = go (i + 1)
          in go 0
     rnf (UnboxedColumn _ v) = v `seq` ()
 
@@ -293,19 +314,25 @@ instance Show Column where
     show (BoxedColumn Nothing column) = show column
     show (BoxedColumn (Just bm) column) =
         let n = VB.length column
-            elems = [ if bitmapTestBit bm i then show (VB.unsafeIndex column i) else "null"
-                    | i <- [0 .. n - 1] ]
+            elems =
+                [ if bitmapTestBit bm i then show (VB.unsafeIndex column i) else "null"
+                | i <- [0 .. n - 1]
+                ]
          in "[" ++ foldl (\acc e -> if null acc then e else acc ++ "," ++ e) "" elems ++ "]"
     show (UnboxedColumn Nothing column) = show column
     show (UnboxedColumn (Just bm) column) =
         let n = VU.length column
-            elems = [ if bitmapTestBit bm i then show (VU.unsafeIndex column i) else "null"
-                    | i <- [0 .. n - 1] ]
+            elems =
+                [ if bitmapTestBit bm i then show (VU.unsafeIndex column i) else "null"
+                | i <- [0 .. n - 1]
+                ]
          in "[" ++ foldl (\acc e -> if null acc then e else acc ++ "," ++ e) "" elems ++ "]"
 
--- | Compare two nullable boxed columns element by element, skipping null slots.
--- Uses a manual loop to avoid stream fusion forcing null-slot error thunks.
-eqBoxedCols :: (Eq a) => Maybe Bitmap -> VB.Vector a -> Maybe Bitmap -> VB.Vector a -> Bool
+{- | Compare two nullable boxed columns element by element, skipping null slots.
+Uses a manual loop to avoid stream fusion forcing null-slot error thunks.
+-}
+eqBoxedCols ::
+    (Eq a) => Maybe Bitmap -> VB.Vector a -> Maybe Bitmap -> VB.Vector a -> Bool
 eqBoxedCols bm1 a bm2 b
     | VB.length a /= VB.length b = False
     | otherwise = go 0
@@ -313,7 +340,7 @@ eqBoxedCols bm1 a bm2 b
     !n = VB.length a
     go !i
         | i >= n = True
-        | nullA || nullB = if nullA == nullB then go (i + 1) else False
+        | nullA || nullB = (nullA == nullB) && go (i + 1)
         | VB.unsafeIndex a i == VB.unsafeIndex b i = go (i + 1)
         | otherwise = False
       where
@@ -331,11 +358,16 @@ instance Eq Column where
         case testEquality (typeRep @t1) (typeRep @t2) of
             Nothing -> False
             Just Refl ->
-                VU.length a == VU.length b &&
-                VU.and (VU.imap (\i x ->
-                    let nullA = maybe False (\bm -> not (bitmapTestBit bm i)) bm1
-                        nullB = maybe False (\bm -> not (bitmapTestBit bm i)) bm2
-                    in if nullA || nullB then nullA == nullB else x == VU.unsafeIndex b i) a)
+                VU.length a == VU.length b
+                    && VU.and
+                        ( VU.imap
+                            ( \i x ->
+                                let nullA = maybe False (\bm -> not (bitmapTestBit bm i)) bm1
+                                    nullB = maybe False (\bm -> not (bitmapTestBit bm i)) bm2
+                                 in if nullA || nullB then nullA == nullB else x == VU.unsafeIndex b i
+                            )
+                            a
+                        )
     (==) _ _ = False
 
 -- Generalised LEQ that does reflection.
@@ -390,7 +422,6 @@ instance
     where
     toColumnRep :: (Columnable a) => VB.Vector (Maybe a) -> Column
     toColumnRep = fromMaybeVec
-
 
 {- | O(n) Convert a vector to a column. Automatically picks the best representation of a vector to store the underlying data in.
 
@@ -460,24 +491,31 @@ mapColumn f = \case
     BoxedColumn bm (col :: VB.Vector a) -> runBoxed bm col
     UnboxedColumn bm (col :: VU.Vector a) -> runUnboxed bm col
   where
-    runBoxed :: forall a. (Columnable a) => Maybe Bitmap -> VB.Vector a -> Either DataFrameException Column
+    runBoxed ::
+        forall a.
+        (Columnable a) =>
+        Maybe Bitmap -> VB.Vector a -> Either DataFrameException Column
     runBoxed bm col = case testEquality (typeRep @b) (typeRep @(Maybe a)) of
         -- user maps over Maybe a (nullable column as Maybe)
         Just Refl ->
             let !n = VB.length col
-                -- Build result directly without intermediate Maybe vector to avoid
+             in -- Build result directly without intermediate Maybe vector to avoid
                 -- fusion forcing null slots via VU.convert.
-             in Right $ case sUnbox @c of
+                Right $ case sUnbox @c of
                     STrue -> UnboxedColumn Nothing $
                         VU.generate n $ \i ->
-                            f (if maybe True (\bm' -> bitmapTestBit bm' i) bm
-                               then Just (VB.unsafeIndex col i)
-                               else Nothing)
+                            f
+                                ( if maybe True (`bitmapTestBit` i) bm
+                                    then Just (VB.unsafeIndex col i)
+                                    else Nothing
+                                )
                     SFalse -> fromVector @c $
                         VB.generate n $ \i ->
-                            f (if maybe True (\bm' -> bitmapTestBit bm' i) bm
-                               then Just (VB.unsafeIndex col i)
-                               else Nothing)
+                            f
+                                ( if maybe True (`bitmapTestBit` i) bm
+                                    then Just (VB.unsafeIndex col i)
+                                    else Nothing
+                                )
         Nothing -> case testEquality (typeRep @a) (typeRep @b) of
             Just Refl ->
                 -- user maps over inner type a; preserve bitmap
@@ -486,21 +524,28 @@ mapColumn f = \case
                     SFalse -> BoxedColumn bm (VB.map f col)
             Nothing -> throwTypeMismatch @a @b
 
-    runUnboxed :: forall a. (Columnable a, VU.Unbox a) => Maybe Bitmap -> VU.Vector a -> Either DataFrameException Column
+    runUnboxed ::
+        forall a.
+        (Columnable a, VU.Unbox a) =>
+        Maybe Bitmap -> VU.Vector a -> Either DataFrameException Column
     runUnboxed bm col = case testEquality (typeRep @b) (typeRep @(Maybe a)) of
         Just Refl ->
             let !n = VU.length col
              in Right $ case sUnbox @c of
                     STrue -> UnboxedColumn Nothing $
                         VU.generate n $ \i ->
-                            f (if maybe True (\bm' -> bitmapTestBit bm' i) bm
-                               then Just (VU.unsafeIndex col i)
-                               else Nothing)
+                            f
+                                ( if maybe True (`bitmapTestBit` i) bm
+                                    then Just (VU.unsafeIndex col i)
+                                    else Nothing
+                                )
                     SFalse -> fromVector @c $
                         VB.generate n $ \i ->
-                            f (if maybe True (\bm' -> bitmapTestBit bm' i) bm
-                               then Just (VU.unsafeIndex col i)
-                               else Nothing)
+                            f
+                                ( if maybe True (`bitmapTestBit` i) bm
+                                    then Just (VU.unsafeIndex col i)
+                                    else Nothing
+                                )
         Nothing -> case testEquality (typeRep @a) (typeRep @b) of
             Just Refl -> Right $ case sUnbox @c of
                 STrue -> UnboxedColumn bm (VU.map f col)
@@ -517,14 +562,23 @@ imapColumn f = \case
     BoxedColumn bm (col :: VB.Vector a) -> runBoxed bm col
     UnboxedColumn bm (col :: VU.Vector a) -> runUnboxed bm col
   where
-    runBoxed :: forall a. (Columnable a) => Maybe Bitmap -> VB.Vector a -> Either DataFrameException Column
+    runBoxed ::
+        forall a.
+        (Columnable a) =>
+        Maybe Bitmap -> VB.Vector a -> Either DataFrameException Column
     runBoxed bm col = case testEquality (typeRep @a) (typeRep @b) of
         Just Refl -> Right $ case sUnbox @c of
-            STrue -> UnboxedColumn bm (VU.generate (VB.length col) (\i -> f i (VB.unsafeIndex col i)))
+            STrue ->
+                UnboxedColumn
+                    bm
+                    (VU.generate (VB.length col) (\i -> f i (VB.unsafeIndex col i)))
             SFalse -> BoxedColumn bm (VB.imap f col)
         Nothing -> throwTypeMismatch @a @b
 
-    runUnboxed :: forall a. (Columnable a, VU.Unbox a) => Maybe Bitmap -> VU.Vector a -> Either DataFrameException Column
+    runUnboxed ::
+        forall a.
+        (Columnable a, VU.Unbox a) =>
+        Maybe Bitmap -> VU.Vector a -> Either DataFrameException Column
     runUnboxed bm col = case testEquality (typeRep @a) (typeRep @b) of
         Just Refl -> Right $ case sUnbox @c of
             STrue -> UnboxedColumn bm (VU.imap f col)
@@ -570,11 +624,26 @@ sliceColumn start n (UnboxedColumn bm xs) =
 atIndicesStable :: VU.Vector Int -> Column -> Column
 atIndicesStable indexes (BoxedColumn bm column) =
     BoxedColumn
-        (fmap (\bm0 -> buildBitmapFromValid $ VU.map (\i -> if bitmapTestBit bm0 i then 1 else 0) indexes) bm)
-        (VB.generate (VU.length indexes) ((column `VB.unsafeIndex`) . (indexes `VU.unsafeIndex`)))
+        ( fmap
+            ( \bm0 ->
+                buildBitmapFromValid $
+                    VU.map (\i -> if bitmapTestBit bm0 i then 1 else 0) indexes
+            )
+            bm
+        )
+        ( VB.generate
+            (VU.length indexes)
+            ((column `VB.unsafeIndex`) . (indexes `VU.unsafeIndex`))
+        )
 atIndicesStable indexes (UnboxedColumn bm column) =
     UnboxedColumn
-        (fmap (\bm0 -> buildBitmapFromValid $ VU.map (\i -> if bitmapTestBit bm0 i then 1 else 0) indexes) bm)
+        ( fmap
+            ( \bm0 ->
+                buildBitmapFromValid $
+                    VU.map (\i -> if bitmapTestBit bm0 i then 1 else 0) indexes
+            )
+            bm
+        )
         (VU.unsafeBackpermute column indexes)
 {-# INLINE atIndicesStable #-}
 
@@ -593,23 +662,33 @@ gatherWithSentinel indices col =
                          in if idx < 0 then VB.unsafeIndex v 0 else VB.unsafeIndex v idx
                     bm = case srcBm of
                         Nothing -> Just newBm
-                        Just sb -> Just (mergeBitmaps newBm (buildBitmapFromValid $ VU.generate n $ \i ->
-                            let idx = VU.unsafeIndex indices i
-                             in if idx >= 0 && bitmapTestBit sb idx then 1 else 0))
+                        Just sb ->
+                            Just
+                                ( mergeBitmaps
+                                    newBm
+                                    ( buildBitmapFromValid $ VU.generate n $ \i ->
+                                        let idx = VU.unsafeIndex indices i
+                                         in if idx >= 0 && bitmapTestBit sb idx then 1 else 0
+                                    )
+                                )
                  in BoxedColumn bm dat
             UnboxedColumn srcBm v ->
                 let dat = runST $ do
                         mv <- VUM.new n
                         VG.iforM_ indices $ \i idx ->
-                            if idx >= 0
-                                then VUM.unsafeWrite mv i (VU.unsafeIndex v idx)
-                                else return ()
+                            when (idx >= 0) $ VUM.unsafeWrite mv i (VU.unsafeIndex v idx)
                         VU.unsafeFreeze mv
                     bm = case srcBm of
                         Nothing -> Just newBm
-                        Just sb -> Just (mergeBitmaps newBm (buildBitmapFromValid $ VU.generate n $ \i ->
-                            let idx = VU.unsafeIndex indices i
-                             in if idx >= 0 && bitmapTestBit sb idx then 1 else 0))
+                        Just sb ->
+                            Just
+                                ( mergeBitmaps
+                                    newBm
+                                    ( buildBitmapFromValid $ VU.generate n $ \i ->
+                                        let idx = VU.unsafeIndex indices i
+                                         in if idx >= 0 && bitmapTestBit sb idx then 1 else 0
+                                    )
+                                )
                  in UnboxedColumn bm dat
 {-# INLINE gatherWithSentinel #-}
 
@@ -890,13 +969,15 @@ headColumn = \case
 zipColumns :: Column -> Column -> Column
 zipColumns (BoxedColumn _ column) (BoxedColumn _ other) = BoxedColumn Nothing (VG.zip column other)
 zipColumns (BoxedColumn _ column) (UnboxedColumn _ other) =
-    BoxedColumn Nothing
+    BoxedColumn
+        Nothing
         ( VB.generate
             (min (VG.length column) (VG.length other))
             (\i -> (column VG.! i, other VG.! i))
         )
 zipColumns (UnboxedColumn _ column) (BoxedColumn _ other) =
-    BoxedColumn Nothing
+    BoxedColumn
+        Nothing
         ( VB.generate
             (min (VG.length column) (VG.length other))
             (\i -> (column VG.! i, other VG.! i))
@@ -954,7 +1035,8 @@ zipWithColumns f (UnboxedColumn bmL (column :: VU.Vector d)) (UnboxedColumn bmR 
     Just Refl -> case testEquality (typeRep @b) (typeRep @e) of
         Just Refl
             -- Fast path: both plain unboxed, no bitmaps involved in the output type
-            | isNothing bmL, isNothing bmR ->
+            | isNothing bmL
+            , isNothing bmR ->
                 pure $ case sUnbox @c of
                     STrue -> UnboxedColumn Nothing (VU.zipWith f column other)
                     SFalse -> fromVector $ VB.zipWith f (VG.convert column) (VG.convert other)
@@ -1041,8 +1123,9 @@ freezeColumn' nulls (MUnboxedColumn col)
                     )
 {-# INLINE freezeColumn' #-}
 
--- | Promote a non-nullable column to a nullable one (add an all-valid bitmap).
--- No-op when already nullable.
+{- | Promote a non-nullable column to a nullable one (add an all-valid bitmap).
+No-op when already nullable.
+-}
 ensureOptional :: Column -> Column
 ensureOptional c@(BoxedColumn (Just _) _) = c
 ensureOptional (BoxedColumn Nothing col) =
@@ -1059,7 +1142,9 @@ expandColumn n column@(BoxedColumn bm col)
         let extra = n - VG.length col
             newBm = case bm of
                 Nothing -> Just (buildBitmapFromNulls n [VG.length col .. n - 1])
-                Just b -> Just (bitmapConcat (VG.length col) b extra (VU.replicate ((extra + 7) `shiftR` 3) 0))
+                Just b ->
+                    Just
+                        (bitmapConcat (VG.length col) b extra (VU.replicate ((extra + 7) `shiftR` 3) 0))
             -- pad data with default (undefined slot, protected by bitmap)
             newCol = col <> VB.replicate extra (errorWithoutStackTrace "expandColumn: null slot")
          in BoxedColumn newBm newCol
@@ -1069,10 +1154,12 @@ expandColumn n column@(UnboxedColumn bm col)
         let extra = n - VG.length col
             newBm = case bm of
                 Nothing -> Just (buildBitmapFromNulls n [VG.length col .. n - 1])
-                Just b -> Just (bitmapConcat (VG.length col) b extra (VU.replicate ((extra + 7) `shiftR` 3) 0))
+                Just b ->
+                    Just
+                        (bitmapConcat (VG.length col) b extra (VU.replicate ((extra + 7) `shiftR` 3) 0))
             newCol = runST $ do
                 mv <- VUM.new n
-                VU.imapM_ (\i x -> VUM.unsafeWrite mv i x) col
+                VU.imapM_ (VUM.unsafeWrite mv) col
                 VU.unsafeFreeze mv
          in UnboxedColumn newBm newCol
 
@@ -1088,7 +1175,8 @@ leftExpandColumn n column@(BoxedColumn bm col)
                 Just b ->
                     let nullPart = VU.replicate ((extra + 7) `shiftR` 3) 0
                      in Just (bitmapConcat extra nullPart origLen b)
-            newCol = VB.replicate extra (errorWithoutStackTrace "leftExpandColumn: null slot") <> col
+            newCol =
+                VB.replicate extra (errorWithoutStackTrace "leftExpandColumn: null slot") <> col
          in BoxedColumn newBm newCol
 leftExpandColumn n column@(UnboxedColumn bm col)
     | n <= VG.length col = column
@@ -1115,8 +1203,12 @@ concatColumns left right = case (left, right) of
         Just Refl ->
             let newBm = case (bmL, bmR) of
                     (Nothing, Nothing) -> Nothing
-                    (Just bl, Nothing) -> Just (bitmapConcat (VB.length l) bl (VB.length r) (allValidBitmap (VB.length r)))
-                    (Nothing, Just br) -> Just (bitmapConcat (VB.length l) (allValidBitmap (VB.length l)) (VB.length r) br)
+                    (Just bl, Nothing) ->
+                        Just
+                            (bitmapConcat (VB.length l) bl (VB.length r) (allValidBitmap (VB.length r)))
+                    (Nothing, Just br) ->
+                        Just
+                            (bitmapConcat (VB.length l) (allValidBitmap (VB.length l)) (VB.length r) br)
                     (Just bl, Just br) -> Just (bitmapConcat (VB.length l) bl (VB.length r) br)
              in pure (BoxedColumn newBm (l <> r))
         Nothing -> Left (mismatchErr (typeOf r) (typeOf l))
@@ -1124,8 +1216,12 @@ concatColumns left right = case (left, right) of
         Just Refl ->
             let newBm = case (bmL, bmR) of
                     (Nothing, Nothing) -> Nothing
-                    (Just bl, Nothing) -> Just (bitmapConcat (VU.length l) bl (VU.length r) (allValidBitmap (VU.length r)))
-                    (Nothing, Just br) -> Just (bitmapConcat (VU.length l) (allValidBitmap (VU.length l)) (VU.length r) br)
+                    (Just bl, Nothing) ->
+                        Just
+                            (bitmapConcat (VU.length l) bl (VU.length r) (allValidBitmap (VU.length r)))
+                    (Nothing, Just br) ->
+                        Just
+                            (bitmapConcat (VU.length l) (allValidBitmap (VU.length l)) (VU.length r) br)
                     (Just bl, Just br) -> Just (bitmapConcat (VU.length l) bl (VU.length r) br)
              in pure (UnboxedColumn newBm (l <> r))
         Nothing -> Left (mismatchErr (typeOf r) (typeOf l))
@@ -1212,18 +1308,47 @@ concatColumnsEither (BoxedColumn bmL left) (BoxedColumn bmR right) = case testEq
     Just Refl ->
         let newBm = case (bmL, bmR) of
                 (Nothing, Nothing) -> Nothing
-                (Just bl, Nothing) -> Just (bitmapConcat (VB.length left) bl (VB.length right) (allValidBitmap (VB.length right)))
-                (Nothing, Just br) -> Just (bitmapConcat (VB.length left) (allValidBitmap (VB.length left)) (VB.length right) br)
+                (Just bl, Nothing) ->
+                    Just
+                        ( bitmapConcat
+                            (VB.length left)
+                            bl
+                            (VB.length right)
+                            (allValidBitmap (VB.length right))
+                        )
+                (Nothing, Just br) ->
+                    Just
+                        ( bitmapConcat
+                            (VB.length left)
+                            (allValidBitmap (VB.length left))
+                            (VB.length right)
+                            br
+                        )
                 (Just bl, Just br) -> Just (bitmapConcat (VB.length left) bl (VB.length right) br)
          in BoxedColumn newBm $ left <> right
 concatColumnsEither (UnboxedColumn bmL left) (UnboxedColumn bmR right) = case testEquality (typeOf left) (typeOf right) of
     Nothing ->
-        BoxedColumn Nothing $ fmap Left (VG.convert left) <> fmap Right (VG.convert right)
+        BoxedColumn Nothing $
+            fmap Left (VG.convert left) <> fmap Right (VG.convert right)
     Just Refl ->
         let newBm = case (bmL, bmR) of
                 (Nothing, Nothing) -> Nothing
-                (Just bl, Nothing) -> Just (bitmapConcat (VU.length left) bl (VU.length right) (allValidBitmap (VU.length right)))
-                (Nothing, Just br) -> Just (bitmapConcat (VU.length left) (allValidBitmap (VU.length left)) (VU.length right) br)
+                (Just bl, Nothing) ->
+                    Just
+                        ( bitmapConcat
+                            (VU.length left)
+                            bl
+                            (VU.length right)
+                            (allValidBitmap (VU.length right))
+                        )
+                (Nothing, Just br) ->
+                    Just
+                        ( bitmapConcat
+                            (VU.length left)
+                            (allValidBitmap (VU.length left))
+                            (VU.length right)
+                            br
+                        )
                 (Just bl, Just br) -> Just (bitmapConcat (VU.length left) bl (VU.length right) br)
          in UnboxedColumn newBm $ left <> right
 concatColumnsEither (BoxedColumn _ left) (UnboxedColumn _ right) =
@@ -1381,9 +1506,25 @@ toDoubleVector column =
                 Nothing -> Right f
                 Just bitmap -> Right $ VU.imap (\i x -> if bitmapTestBit bitmap i then x else read "NaN") f
             Nothing -> case sFloating @a of
-                STrue -> Right (VU.imap (\i x -> case bm of { Just bitmap | not (bitmapTestBit bitmap i) -> read "NaN"; _ -> realToFrac x }) f)
+                STrue ->
+                    Right
+                        ( VU.imap
+                            ( \i x -> case bm of
+                                Just bitmap | not (bitmapTestBit bitmap i) -> read "NaN"
+                                _ -> realToFrac x
+                            )
+                            f
+                        )
                 SFalse -> case sIntegral @a of
-                    STrue -> Right (VU.imap (\i x -> case bm of { Just bitmap | not (bitmapTestBit bitmap i) -> read "NaN"; _ -> fromIntegral x }) f)
+                    STrue ->
+                        Right
+                            ( VU.imap
+                                ( \i x -> case bm of
+                                    Just bitmap | not (bitmapTestBit bitmap i) -> read "NaN"
+                                    _ -> fromIntegral x
+                                )
+                                f
+                            )
                     SFalse ->
                         Left $
                             TypeMismatchException
@@ -1395,7 +1536,16 @@ toDoubleVector column =
                                     }
                                 )
         BoxedColumn bm (f :: VB.Vector a) -> case testEquality (typeRep @a) (typeRep @Integer) of
-            Just Refl -> Right (VB.convert $ VB.imap (\i x -> case bm of { Just bitmap | not (bitmapTestBit bitmap i) -> read "NaN"; _ -> fromIntegral x }) f)
+            Just Refl ->
+                Right
+                    ( VB.convert $
+                        VB.imap
+                            ( \i x -> case bm of
+                                Just bitmap | not (bitmapTestBit bitmap i) -> read "NaN"
+                                _ -> fromIntegral x
+                            )
+                            f
+                    )
             Nothing ->
                 Left $
                     TypeMismatchException
@@ -1438,9 +1588,25 @@ toFloatVector column =
                 Nothing -> Right f
                 Just bitmap -> Right $ VU.imap (\i x -> if bitmapTestBit bitmap i then x else read "NaN") f
             Nothing -> case sFloating @a of
-                STrue -> Right (VU.imap (\i x -> case bm of { Just bitmap | not (bitmapTestBit bitmap i) -> read "NaN"; _ -> realToFrac x }) f)
+                STrue ->
+                    Right
+                        ( VU.imap
+                            ( \i x -> case bm of
+                                Just bitmap | not (bitmapTestBit bitmap i) -> read "NaN"
+                                _ -> realToFrac x
+                            )
+                            f
+                        )
                 SFalse -> case sIntegral @a of
-                    STrue -> Right (VU.imap (\i x -> case bm of { Just bitmap | not (bitmapTestBit bitmap i) -> read "NaN"; _ -> fromIntegral x }) f)
+                    STrue ->
+                        Right
+                            ( VU.imap
+                                ( \i x -> case bm of
+                                    Just bitmap | not (bitmapTestBit bitmap i) -> read "NaN"
+                                    _ -> fromIntegral x
+                                )
+                                f
+                            )
                     SFalse ->
                         Left $
                             TypeMismatchException
@@ -1452,7 +1618,16 @@ toFloatVector column =
                                     }
                                 )
         BoxedColumn bm (f :: VB.Vector a) -> case testEquality (typeRep @a) (typeRep @Integer) of
-            Just Refl -> Right (VB.convert $ VB.imap (\i x -> case bm of { Just bitmap | not (bitmapTestBit bitmap i) -> read "NaN"; _ -> fromIntegral x }) f)
+            Just Refl ->
+                Right
+                    ( VB.convert $
+                        VB.imap
+                            ( \i x -> case bm of
+                                Just bitmap | not (bitmapTestBit bitmap i) -> read "NaN"
+                                _ -> fromIntegral x
+                            )
+                            f
+                    )
             Nothing ->
                 Left $
                     TypeMismatchException

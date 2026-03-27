@@ -113,12 +113,14 @@ executePlan (Limit k node) =
 
 -- | Build a SortOrder from a column's runtime type.
 mkSortOrder :: Bool -> T.Text -> Column -> SortOrder
-mkSortOrder True n (UnboxedColumn (_ :: VU.Vector a)) = Asc (Col @a n)
-mkSortOrder False n (UnboxedColumn (_ :: VU.Vector a)) = Desc (Col @a n)
-mkSortOrder True n (BoxedColumn (_ :: V.Vector a)) = Asc (Col @a n)
-mkSortOrder False n (BoxedColumn (_ :: V.Vector a)) = Desc (Col @a n)
-mkSortOrder True n (OptionalColumn (_ :: V.Vector (Maybe a))) = Asc (Col @(Maybe a) n)
-mkSortOrder False n (OptionalColumn (_ :: V.Vector (Maybe a))) = Desc (Col @(Maybe a) n)
+mkSortOrder True n (UnboxedColumn Nothing (_ :: VU.Vector a)) = Asc (Col @a n)
+mkSortOrder False n (UnboxedColumn Nothing (_ :: VU.Vector a)) = Desc (Col @a n)
+mkSortOrder True n (UnboxedColumn (Just _) (_ :: VU.Vector a)) = Asc (Col @(Maybe a) n)
+mkSortOrder False n (UnboxedColumn (Just _) (_ :: VU.Vector a)) = Desc (Col @(Maybe a) n)
+mkSortOrder True n (BoxedColumn Nothing (_ :: V.Vector a)) = Asc (Col @a n)
+mkSortOrder False n (BoxedColumn Nothing (_ :: V.Vector a)) = Desc (Col @a n)
+mkSortOrder True n (BoxedColumn (Just _) (_ :: V.Vector a)) = Asc (Col @(Maybe a) n)
+mkSortOrder False n (BoxedColumn (Just _) (_ :: V.Vector a)) = Desc (Col @(Maybe a) n)
 
 -- | Dispatch aggregation by fn name and runtime column type.
 buildNamedExpr :: DataFrame -> AggSpec -> IO NamedExpr
@@ -133,22 +135,28 @@ buildNamedExpr df (AggSpec name fn colName) =
                     "DataFrame.IR: unknown aggregation '" ++ T.unpack other ++ "'"
 
 countExpr :: T.Text -> T.Text -> Column -> IO NamedExpr
-countExpr name colName (UnboxedColumn (_ :: VU.Vector a)) = return $ name .= count (Col @a colName)
-countExpr name colName (BoxedColumn (_ :: V.Vector a)) = return $ name .= count (Col @a colName)
-countExpr name colName (OptionalColumn (_ :: V.Vector (Maybe a))) = return $ name .= count (Col @(Maybe a) colName)
+countExpr name colName (UnboxedColumn Nothing (_ :: VU.Vector a)) = return $ name .= count (Col @a colName)
+countExpr name colName (UnboxedColumn (Just _) (_ :: VU.Vector a)) = return $ name .= count (Col @(Maybe a) colName)
+countExpr name colName (BoxedColumn Nothing (_ :: V.Vector a)) = return $ name .= count (Col @a colName)
+countExpr name colName (BoxedColumn (Just _) (_ :: V.Vector a)) = return $ name .= count (Col @(Maybe a) colName)
 
 sumExpr :: T.Text -> T.Text -> Column -> IO NamedExpr
-sumExpr name colName (UnboxedColumn (_ :: VU.Vector a))
+sumExpr name colName (UnboxedColumn Nothing (_ :: VU.Vector a))
     | Just Refl <- testEquality (typeRep @a) (typeRep @Int) =
         return $ name .= Functions.sum (Col @Int colName)
     | Just Refl <- testEquality (typeRep @a) (typeRep @Double) =
         return $ name .= Functions.sum (Col @Double colName)
-sumExpr name colName (BoxedColumn (_ :: V.Vector a))
+sumExpr name colName (UnboxedColumn (Just _) (_ :: VU.Vector a))
+    | Just Refl <- testEquality (typeRep @a) (typeRep @Int) =
+        return $ name .= sumMaybe (Col @(Maybe Int) colName)
+    | Just Refl <- testEquality (typeRep @a) (typeRep @Double) =
+        return $ name .= sumMaybe (Col @(Maybe Double) colName)
+sumExpr name colName (BoxedColumn Nothing (_ :: V.Vector a))
     | Just Refl <- testEquality (typeRep @a) (typeRep @Int) =
         return $ name .= Functions.sum (Col @Int colName)
     | Just Refl <- testEquality (typeRep @a) (typeRep @Double) =
         return $ name .= Functions.sum (Col @Double colName)
-sumExpr name colName (OptionalColumn (_ :: V.Vector (Maybe a)))
+sumExpr name colName (BoxedColumn (Just _) (_ :: V.Vector a))
     | Just Refl <- testEquality (typeRep @a) (typeRep @Int) =
         return $ name .= sumMaybe (Col @(Maybe Int) colName)
     | Just Refl <- testEquality (typeRep @a) (typeRep @Double) =
@@ -159,15 +167,20 @@ sumExpr name colName _ =
             "DataFrame.IR: sum: unsupported column type for '" ++ T.unpack colName ++ "'"
 
 meanExpr :: T.Text -> T.Text -> Column -> IO NamedExpr
-meanExpr name colName (UnboxedColumn (_ :: VU.Vector a))
+meanExpr name colName (UnboxedColumn Nothing (_ :: VU.Vector a))
     | Just Refl <- testEquality (typeRep @a) (typeRep @Int) =
         return $ name .= mean (Col @Int colName)
     | Just Refl <- testEquality (typeRep @a) (typeRep @Double) =
         return $ name .= mean (Col @Double colName)
-meanExpr name colName (BoxedColumn (_ :: V.Vector a))
+meanExpr name colName (UnboxedColumn (Just _) (_ :: VU.Vector a))
+    | Just Refl <- testEquality (typeRep @a) (typeRep @Double) =
+        return $ name .= meanMaybe (Col @(Maybe Double) colName)
+    | Just Refl <- testEquality (typeRep @a) (typeRep @Int) =
+        return $ name .= meanMaybe (Col @(Maybe Int) colName)
+meanExpr name colName (BoxedColumn Nothing (_ :: V.Vector a))
     | Just Refl <- testEquality (typeRep @a) (typeRep @Double) =
         return $ name .= mean (Col @Double colName)
-meanExpr name colName (OptionalColumn (_ :: V.Vector (Maybe a)))
+meanExpr name colName (BoxedColumn (Just _) (_ :: V.Vector a))
     | Just Refl <- testEquality (typeRep @a) (typeRep @Double) =
         return $ name .= meanMaybe (Col @(Maybe Double) colName)
     | Just Refl <- testEquality (typeRep @a) (typeRep @Int) =

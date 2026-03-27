@@ -1065,9 +1065,12 @@ assembleFullOuter csSet left right leftIxs rightIxs =
             (BoxedColumn rBm (rCol :: VB.Vector b)) =
                 case testEquality (typeRep @a) (typeRep @b) of
                     Just Refl ->
-                        let asMaybe bm col = VB.imap (\i v -> case bm of
-                                Just bm' -> if bitmapTestBit bm' i then Just v else Nothing
-                                Nothing   -> Just v) col
+                        let asMaybe bm =
+                                VB.imap
+                                    ( \i v -> case bm of
+                                        Just bm' -> if bitmapTestBit bm' i then Just v else Nothing
+                                        Nothing -> Just v
+                                    )
                             lMaybe = asMaybe lBm lCol
                             rMaybe = asMaybe rBm rCol
                          in D.fromVector $

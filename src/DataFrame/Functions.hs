@@ -628,7 +628,8 @@ declareColumnsWithPrefix' prefix df =
      in
         fmap concat $ forM specs $ \(raw, nm, tyStr) -> do
             ty <- typeFromString (words tyStr)
-            trace (T.unpack (nm <> " :: Expr " <> T.pack tyStr)) pure ()
+            let tyDisplay = if ' ' `elem` tyStr then "(" <> T.pack tyStr <> ")" else T.pack tyStr
+            trace (T.unpack (nm <> " :: Expr " <> tyDisplay)) pure ()
             let n = mkName (T.unpack nm)
             sig <- sigD n [t|Expr $(pure ty)|]
             val <- valD (varP n) (normalB [|col $(TH.lift raw)|]) []

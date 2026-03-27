@@ -730,10 +730,12 @@ generateConditionsOld cfg df =
                 ]
           where
             colConds (!l, !r) = case (unsafeGetColumn l df, unsafeGetColumn r df) of
-                (BoxedColumn Nothing (col1 :: V.Vector a), BoxedColumn Nothing (_ :: V.Vector b)) ->
-                    case testEquality (typeRep @a) (typeRep @b) of
-                        Nothing -> []
-                        Just Refl -> [F.lift2 (==) (Col @a l) (Col @a r)]
+                ( BoxedColumn Nothing (col1 :: V.Vector a)
+                    , BoxedColumn Nothing (_ :: V.Vector b)
+                    ) ->
+                        case testEquality (typeRep @a) (typeRep @b) of
+                            Nothing -> []
+                            Just Refl -> [F.lift2 (==) (Col @a l) (Col @a r)]
                 (UnboxedColumn _ (_ :: VU.Vector a), UnboxedColumn _ (_ :: VU.Vector b)) -> []
                 ( BoxedColumn (Just _) (_ :: V.Vector a)
                     , BoxedColumn (Just _) (_ :: V.Vector b)

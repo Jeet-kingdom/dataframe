@@ -203,7 +203,8 @@ applyWhereWAI =
         ( assertEqual
             "applyWhere works as intended"
             ( Just $
-                DI.UnboxedColumn Nothing
+                DI.UnboxedColumn
+                    Nothing
                     (VU.fromList (zipWith ($) (cycle [id, (+ 1)]) [(1 :: Int) .. 26]))
             )
             ( D.getColumn "test5" $

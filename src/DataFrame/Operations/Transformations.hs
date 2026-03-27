@@ -21,7 +21,6 @@ import Control.Exception (throw)
 import Data.Maybe
 import DataFrame.Errors (DataFrameException (..), TypeErrorContext (..))
 import DataFrame.Internal.Column (
-    Column (..),
     Columnable,
     TypedColumn (..),
     hasMissing,

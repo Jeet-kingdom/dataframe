@@ -364,7 +364,6 @@ extractStringColumn colName df =
              in case col of
                     BoxedColumn _ vec -> V.toList $ V.map (T.pack . show) vec
                     UnboxedColumn _ vec -> V.toList $ VG.map (T.pack . show) (VG.convert vec)
-                    _ -> []
 
 extractNumericColumn :: (HasCallStack) => T.Text -> DataFrame -> [Double]
 extractNumericColumn colName df =
@@ -375,7 +374,6 @@ extractNumericColumn colName df =
              in case col of
                     BoxedColumn _ vec -> vectorToDoubles vec
                     UnboxedColumn _ vec -> unboxedVectorToDoubles vec
-                    _ -> []
 
 vectorToDoubles :: forall a. (Columnable a, Show a) => V.Vector a -> [Double]
 vectorToDoubles vec =

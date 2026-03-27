@@ -864,7 +864,6 @@ extractNumericColumn colName df =
              in case col of
                     BoxedColumn _ vec -> vectorToDoubles vec
                     UnboxedColumn _ vec -> unboxedVectorToDoubles vec
-                    _ -> []
 
 vectorToDoubles :: forall a. (Columnable a, Show a) => V.Vector a -> [Double]
 vectorToDoubles vec =

@@ -31,7 +31,9 @@ addBoxedColumn =
     TestCase
         ( assertEqual
             "Two columns should be equal"
-            (Just $ DI.BoxedColumn Nothing (V.fromList ["Thuba" :: T.Text, "Zodwa", "Themba"]))
+            ( Just $
+                DI.BoxedColumn Nothing (V.fromList ["Thuba" :: T.Text, "Zodwa", "Themba"])
+            )
             ( DI.getColumn "new" $
                 D.insertVector "new" (V.fromList ["Thuba" :: T.Text, "Zodwa", "Themba"]) D.empty
             )

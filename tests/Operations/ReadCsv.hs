@@ -18,7 +18,7 @@ import qualified DataFrame as D
 import Data.Function (on)
 import Data.Maybe (fromMaybe)
 import Data.Type.Equality (testEquality, (:~:) (Refl))
-import DataFrame.Internal.Column (Column (..), columnTypeString, bitmapTestBit)
+import DataFrame.Internal.Column (Column (..), bitmapTestBit, columnTypeString)
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.DataFrame (
     DataFrame (..),
@@ -84,10 +84,12 @@ getRowEscaped sep df i = V.ifoldr go [] (columns df)
         Just e -> escapeField sep textRep : acc
           where
             isNull = case bm of Just bm' -> not (bitmapTestBit bm' i); Nothing -> False
-            textRep = if isNull then "" else
-                case testEquality (typeRep @a) (typeRep @T.Text) of
-                    Just Refl -> e
-                    Nothing -> T.pack (show e)
+            textRep =
+                if isNull
+                    then ""
+                    else case testEquality (typeRep @a) (typeRep @T.Text) of
+                        Just Refl -> e
+                        Nothing -> T.pack (show e)
         Nothing -> acc
     go _ (UnboxedColumn bm c) acc = case c VU.!? i of
         Just e ->

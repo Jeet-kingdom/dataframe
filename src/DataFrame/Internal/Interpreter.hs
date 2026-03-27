@@ -218,11 +218,15 @@ sliceGroups col os indices = case col of
                     (VU.length indices)
                     ((vec `V.unsafeIndex`) . (indices `VU.unsafeIndex`))
          in V.generate nGroups $ \i ->
-                BoxedColumn (fmap (\b -> bitmapSlice (start i) (len i) b) bm) (V.unsafeSlice (start i) (len i) sorted)
+                BoxedColumn
+                    (fmap (bitmapSlice (start i) (len i)) bm)
+                    (V.unsafeSlice (start i) (len i) sorted)
     UnboxedColumn bm vec ->
         let !sorted = VU.unsafeBackpermute vec indices
          in V.generate nGroups $ \i ->
-                UnboxedColumn (fmap (\b -> bitmapSlice (start i) (len i) b) bm) (VU.unsafeSlice (start i) (len i) sorted)
+                UnboxedColumn
+                    (fmap (bitmapSlice (start i) (len i)) bm)
+                    (VU.unsafeSlice (start i) (len i) sorted)
   where
     !nGroups = VU.length os - 1
     start i = os `VU.unsafeIndex` i
@@ -398,12 +402,28 @@ tryParseWith onResult col = case col of
         case testEquality (typeRep @c) (typeRep @String) of
             Just Refl -> case bm of
                 Nothing -> Right $ fromVector @b $ V.map (parseWith onResult) v
-                Just bitmap -> Right $ fromVector @b $ V.imap (\i x -> if bitmapTestBit bitmap i then parseWith onResult x else onResult (Left "null")) v
+                Just bitmap ->
+                    Right $
+                        fromVector @b $
+                            V.imap
+                                ( \i x ->
+                                    if bitmapTestBit bitmap i then parseWith onResult x else onResult (Left "null")
+                                )
+                                v
             Nothing ->
                 case testEquality (typeRep @c) (typeRep @T.Text) of
                     Just Refl -> case bm of
                         Nothing -> Right $ fromVector @b $ V.map (parseWith onResult . T.unpack) v
-                        Just bitmap -> Right $ fromVector @b $ V.imap (\i x -> if bitmapTestBit bitmap i then parseWith onResult (T.unpack x) else onResult (Left "null")) v
+                        Just bitmap ->
+                            Right $
+                                fromVector @b $
+                                    V.imap
+                                        ( \i x ->
+                                            if bitmapTestBit bitmap i
+                                                then parseWith onResult (T.unpack x)
+                                                else onResult (Left "null")
+                                        )
+                                        v
                     Nothing -> castMismatch @c @b
     UnboxedColumn _ (_ :: VU.Vector c) -> castMismatch @c @b
 

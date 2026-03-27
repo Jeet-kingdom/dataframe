@@ -51,11 +51,14 @@ import qualified Data.Vector.Storable as VS
 import qualified Data.Vector.Unboxed as VU
 
 import Data.Bits (setBit, shiftL, testBit, (.|.))
-import Data.Maybe (fromMaybe, isJust)
 import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
 import Data.Word (Word16, Word32, Word64, Word8)
 import qualified DataFrame.Internal.Binary as Binary
-import DataFrame.Internal.Column (Bitmap, Column (..), bitmapTestBit, buildBitmapFromValid)
+import DataFrame.Internal.Column (
+    Column (..),
+    bitmapTestBit,
+    buildBitmapFromValid,
+ )
 import DataFrame.Internal.DataFrame (DataFrame (..))
 import Foreign (ForeignPtr, castForeignPtr, plusForeignPtr, sizeOf)
 import System.Directory (getTemporaryDirectory, removeFile)

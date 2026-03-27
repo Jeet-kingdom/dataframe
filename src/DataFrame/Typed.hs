@@ -183,6 +183,7 @@ module DataFrame.Typed (
     -- * Template Haskell
     deriveSchema,
     deriveSchemaFromCsvFile,
+    deriveSchemaFromCsvFileWith,
 
     -- * Schema type families (for advanced use)
     Lookup,
@@ -190,6 +191,7 @@ module DataFrame.Typed (
     SubsetSchema,
     ExcludeSchema,
     RenameInSchema,
+    RenameManyInSchema,
     RemoveColumn,
     Impute,
     Append,
@@ -225,7 +227,11 @@ import DataFrame.Typed.Freeze (freeze, freezeWithError, thaw, unsafeFreeze)
 import DataFrame.Typed.Join (fullOuterJoin, innerJoin, leftJoin, rightJoin)
 import DataFrame.Typed.Operations
 import DataFrame.Typed.Schema
-import DataFrame.Typed.TH (deriveSchema, deriveSchemaFromCsvFile)
+import DataFrame.Typed.TH (
+    deriveSchema,
+    deriveSchemaFromCsvFile,
+    deriveSchemaFromCsvFileWith,
+ )
 import DataFrame.Typed.Types (
     Column,
     TSortOrder (..),
