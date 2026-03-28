@@ -14,7 +14,7 @@ cabal build all
 
 cd ../dataframe-hasktorch
 
-cabal build
+cabal build all
 
 cd ../examples
 
