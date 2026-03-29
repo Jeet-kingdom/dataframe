@@ -86,11 +86,11 @@ main = do
 
 clean ::
     ( DT.AssertPresent "Ticket" cols
-    , DT.Lookup "Ticket" cols ~ Maybe T.Text
+    , DT.SafeLookup "Ticket" cols ~ Maybe T.Text
     , DT.AssertPresent "Name" cols
-    , DT.Lookup "Name" cols ~ Maybe T.Text
+    , DT.SafeLookup "Name" cols ~ Maybe T.Text
     , DT.AssertPresent "Cabin" cols
-    , DT.Lookup "Cabin" cols ~ Maybe T.Text
+    , DT.SafeLookup "Cabin" cols ~ Maybe T.Text
     ) =>
     DT.TypedDataFrame cols ->
     DT.TypedDataFrame

@@ -77,9 +77,10 @@ type family Lookup (name :: Symbol) (cols :: [Type]) :: Type where
         TypeError
             ('Text "Column '" ':<>: 'Text name ':<>: 'Text "' not found in schema")
 
--- | Like 'Lookup', but returns a harmless fallback ('Int') instead of
--- 'TypeError' when the column is not found.  Use together with
--- 'AssertPresent' so the error fires exactly once.
+{- | Like 'Lookup', but returns a harmless fallback ('Int') instead of
+'TypeError' when the column is not found.  Use together with
+'AssertPresent' so the error fires exactly once.
+-}
 type family SafeLookup (name :: Symbol) (cols :: [Type]) :: Type where
     SafeLookup name (Column name a ': _) = a
     SafeLookup name (Column _ _ ': rest) = SafeLookup name rest
