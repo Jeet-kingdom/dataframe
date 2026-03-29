@@ -59,7 +59,6 @@ executable examples
                    DataFrame.Display.Terminal.Plot,
                    DataFrame.IO.CSV,
                    DataFrame.IO.JSON,
-                   DataFrame.IO.Unstable.CSV,
                    DataFrame.IO.Parquet,
                    DataFrame.IO.Parquet.Binary,
                    DataFrame.IO.Parquet.Dictionary,
