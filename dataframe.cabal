@@ -114,6 +114,7 @@ library
                     DataFrame.Typed.Aggregate,
                     DataFrame.Typed.TH,
                     DataFrame.Typed.Expr,
+                    DataFrame.Typed.Lazy,
                     DataFrame.Typed
     build-depends:    base >= 4 && <5,
                       deepseq >= 1 && < 2,
