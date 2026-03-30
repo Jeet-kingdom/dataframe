@@ -13,12 +13,9 @@ import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.Vector as V
-import qualified Data.Vector.Algorithms.Merge as VA
-import qualified Data.Vector.Generic as VG
 import qualified Data.Vector.Unboxed as VU
 
 import Control.Exception (throw)
-import Control.Monad.ST (runST)
 import Data.Function (on)
 import Data.Maybe (fromMaybe)
 import Data.Type.Equality (TestEquality (..))
@@ -27,15 +24,6 @@ import DataFrame.Errors (DataFrameException (..))
 import DataFrame.Internal.Column
 import DataFrame.Internal.DataFrame
 import DataFrame.Internal.Expression (Expr (..))
-import Text.ParserCombinators.ReadPrec (ReadPrec)
-import Text.Read (
-    Lexeme (Ident),
-    lexP,
-    parens,
-    readListPrec,
-    readListPrecDefault,
-    readPrec,
- )
 import Type.Reflection (typeOf, typeRep)
 
 data Any where
@@ -47,12 +35,6 @@ instance Eq Any where
         Refl <- testEquality (typeOf a) (typeOf b)
         return $ a == b
 
-instance Ord Any where
-    (<=) :: Any -> Any -> Bool
-    (Value a) <= (Value b) = fromMaybe False $ do
-        Refl <- testEquality (typeOf a) (typeOf b)
-        return $ a <= b
-
 instance Show Any where
     show :: Any -> String
     show (Value a) = T.unpack (showValue a)
@@ -63,15 +45,6 @@ showValue v = case testEquality (typeRep @a) (typeRep @T.Text) of
     Nothing -> case testEquality (typeRep @a) (typeRep @String) of
         Just Refl -> T.pack v
         Nothing -> (T.pack . show) v
-
-instance Read Any where
-    readListPrec :: ReadPrec [Any]
-    readListPrec = readListPrecDefault
-
-    readPrec :: ReadPrec Any
-    readPrec = parens $ do
-        Ident "Value" <- lexP
-        readPrec
 
 -- | Wraps a value into an \Any\ type. This helps up represent rows as heterogenous lists.
 toAny :: forall a. (Columnable a) => a -> Any
@@ -200,17 +173,3 @@ mkRowRep df names i = V.generate (L.length names) (\index -> get (names' V.! ind
             Nothing -> throwError name
         Nothing ->
             throw $ ColumnsNotFoundException [name] "mkRowRep" (M.keys $ columnIndices df)
-
-sortedIndexes' :: [Bool] -> V.Vector Row -> VU.Vector Int
-sortedIndexes' flipCompare rows = runST $ do
-    withIndexes <- VG.thaw (V.indexed rows)
-    VA.sortBy (produceOrderingFromRow flipCompare `on` snd) withIndexes
-    sorted <- VG.unsafeFreeze withIndexes
-    return $ VU.generate (VG.length rows) (\i -> fst (sorted VG.! i))
-
-produceOrderingFromRow :: [Bool] -> Row -> Row -> Ordering
-produceOrderingFromRow mustFlips v1 v2 = V.foldr (<>) mempty vZipped
-  where
-    vFlip = V.fromList mustFlips
-    vZipped =
-        V.zipWith3 (\b e1 e2 -> if b then compare e1 e2 else compare e2 e1) vFlip v1 v2

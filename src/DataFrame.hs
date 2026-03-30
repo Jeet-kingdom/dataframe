@@ -282,6 +282,7 @@ import DataFrame.Internal.DataFrame as Dataframe (
     empty,
     null,
     toCsv,
+    toCsv',
     toMarkdown,
     toMarkdown',
     toSeparated,

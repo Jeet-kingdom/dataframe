@@ -53,13 +53,13 @@ data AggStrategy a b where
 data Expr a where
     Col :: (Columnable a) => T.Text -> Expr a
     CastWith ::
-        (Columnable a, Columnable b) =>
+        (Columnable a, Columnable b, Read a) =>
         T.Text ->
         T.Text ->
         (Either String a -> b) ->
         Expr b
     CastExprWith ::
-        (Columnable a, Columnable b, Columnable src) =>
+        (Columnable a, Columnable b, Columnable src, Read a) =>
         T.Text ->
         (Either String a -> b) ->
         Expr src ->
@@ -246,7 +246,7 @@ instance (Show a) => Show (Expr a) where
     show (Agg (FoldAgg op _ _) expr) = "(" ++ T.unpack op ++ " " ++ show expr ++ ")"
     show (Agg (MergeAgg op _ _ _ _) expr) = "(" ++ T.unpack op ++ " " ++ show expr ++ ")"
 
-normalize :: (Eq a, Ord a, Show a, Typeable a) => Expr a -> Expr a
+normalize :: (Show a, Typeable a) => Expr a -> Expr a
 normalize expr = case expr of
     Col name -> Col name
     CastWith n t f -> CastWith n t f
@@ -306,43 +306,6 @@ instance (Eq a, Columnable a) => Eq (Expr a) where
         eqNormalized (Agg (MergeAgg n1 _ _ _ _) e1) (Agg (MergeAgg n2 _ _ _ _) e2) =
             n1 == n2 && e1 `exprEq` e2
         eqNormalized _ _ = False
-
-instance (Ord a, Columnable a) => Ord (Expr a) where
-    compare :: Expr a -> Expr a -> Ordering
-    compare e1 e2 = case (e1, e2) of
-        (Col n1, Col n2) -> compare n1 n2
-        (CastWith n1 t1 _, CastWith n2 t2 _) -> compare n1 n2 <> compare t1 t2
-        (CastExprWith t1 _ _, CastExprWith t2 _ _) -> compare t1 t2
-        (Lit v1, Lit v2) -> compare v1 v2
-        (If c1 t1 e1', If c2 t2 e2') ->
-            compare c1 c2 <> exprComp t1 t2 <> exprComp e1' e2'
-        (Unary op1 e1', Unary op2 e2') -> compare (unaryName op1) (unaryName op2) <> exprComp e1' e2'
-        (Binary op1 a1 b1, Binary op2 a2 b2) ->
-            compare (binaryName op1) (binaryName op2) <> exprComp a1 a2 <> exprComp b1 b2
-        (Agg (CollectAgg n1 _) e1', Agg (CollectAgg n2 _) e2') -> compare n1 n2 <> exprComp e1' e2'
-        (Agg (FoldAgg n1 _ _) e1', Agg (FoldAgg n2 _ _) e2') -> compare n1 n2 <> exprComp e1' e2'
-        (Agg (MergeAgg n1 _ _ _ _) e1', Agg (MergeAgg n2 _ _ _ _) e2') -> compare n1 n2 <> exprComp e1' e2'
-        -- Different constructors - compare by priority
-        (Col _, _) -> LT
-        (_, Col _) -> GT
-        (CastWith{}, _) -> LT
-        (_, CastWith{}) -> GT
-        (CastExprWith{}, _) -> LT
-        (_, CastExprWith{}) -> GT
-        (Lit _, _) -> LT
-        (_, Lit _) -> GT
-        (Unary{}, _) -> LT
-        (_, Unary{}) -> GT
-        (Binary{}, _) -> LT
-        (_, Binary{}) -> GT
-        (If{}, _) -> LT
-        (_, If{}) -> GT
-        (Agg{}, _) -> LT
-
-exprComp :: (Columnable b, Columnable c) => Expr b -> Expr c -> Ordering
-exprComp e1 e2 = case testEquality (typeOf e1) (typeOf e2) of
-    Just Refl -> e1 `compare` e2
-    Nothing -> LT
 
 replaceExpr ::
     forall a b c.

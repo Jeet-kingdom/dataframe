@@ -125,14 +125,14 @@ nullLift2 f =
 values are wrapped in 'Just'.  Existing 'Nothing' in optional source columns
 stays as 'Nothing'.
 -}
-cast :: forall a. (Columnable a) => T.Text -> Expr (Maybe a)
+cast :: forall a. (Columnable a, Read a) => T.Text -> Expr (Maybe a)
 cast name = CastWith name "cast" (either (const Nothing) Just)
 
 {- | Lenient coercion that substitutes a default for unconvertible values.
 Looks up column @name@, coerces its values to @a@, and uses @def@ wherever
 conversion fails or the source value is 'Nothing'.
 -}
-castWithDefault :: forall a. (Columnable a) => a -> T.Text -> Expr a
+castWithDefault :: forall a. (Columnable a, Read a) => a -> T.Text -> Expr a
 castWithDefault def name =
     CastWith name ("castWithDefault:" <> T.pack (show def)) (fromRight def)
 
@@ -142,7 +142,8 @@ their original string representation, so the caller can inspect or handle
 them downstream.  Existing 'Nothing' in optional source columns becomes
 @Left \"null\"@.
 -}
-castEither :: forall a. (Columnable a) => T.Text -> Expr (Either T.Text a)
+castEither ::
+    forall a. (Columnable a, Read a) => T.Text -> Expr (Either T.Text a)
 castEither name = CastWith name "castEither" (either (Left . T.pack) Right)
 
 {- | Lenient coercion for assertedly non-nullable columns.
@@ -150,7 +151,7 @@ Substitutes @error@ for @Nothing@, so it will crash at evaluation time if
 any @Nothing@ is actually encountered.  For non-nullable and
 fully-populated nullable columns no cost is paid.
 -}
-unsafeCast :: forall a. (Columnable a) => T.Text -> Expr a
+unsafeCast :: forall a. (Columnable a, Read a) => T.Text -> Expr a
 unsafeCast name =
     CastWith
         name
@@ -158,11 +159,12 @@ unsafeCast name =
         (fromRight (error "unsafeCast: unexpected Nothing in column"))
 
 castExpr ::
-    forall b src. (Columnable b, Columnable src) => Expr src -> Expr (Maybe b)
+    forall b src.
+    (Columnable b, Columnable src, Read b) => Expr src -> Expr (Maybe b)
 castExpr = CastExprWith @b @(Maybe b) @src "castExpr" (either (const Nothing) Just)
 
 castExprWithDefault ::
-    forall b src. (Columnable b, Columnable src) => b -> Expr src -> Expr b
+    forall b src. (Columnable b, Columnable src, Read b) => b -> Expr src -> Expr b
 castExprWithDefault def =
     CastExprWith @b @b @src
         ("castExprWithDefault:" <> T.pack (show def))
@@ -170,14 +172,14 @@ castExprWithDefault def =
 
 castExprEither ::
     forall b src.
-    (Columnable b, Columnable src) => Expr src -> Expr (Either T.Text b)
+    (Columnable b, Columnable src, Read b) => Expr src -> Expr (Either T.Text b)
 castExprEither =
     CastExprWith @b @(Either T.Text b) @src
         "castExprEither"
         (either (Left . T.pack) Right)
 
 unsafeCastExpr ::
-    forall b src. (Columnable b, Columnable src) => Expr src -> Expr b
+    forall b src. (Columnable b, Columnable src, Read b) => Expr src -> Expr b
 unsafeCastExpr =
     CastExprWith @b @b @src
         "unsafeCastExpr"

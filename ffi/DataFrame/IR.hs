@@ -1,4 +1,5 @@
 {-# LANGUAGE ExplicitNamespaces #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -15,16 +16,19 @@ module DataFrame.IR (
 
 import Data.Aeson (FromJSON (..), withObject, (.:))
 import Data.Aeson.Types (Parser)
+import qualified Data.ByteString as BS
+import Data.Int (Int16, Int32, Int64, Int8)
 import qualified Data.Text as T
 import Data.Type.Equality (
     TestEquality (testEquality),
     type (:~:) (Refl),
+    type (:~~:) (HRefl),
  )
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
-import Data.Word (Word64)
+import Data.Word (Word, Word16, Word32, Word64, Word8)
 import Foreign (wordPtrToPtr)
-import Type.Reflection (typeRep)
+import Type.Reflection (SomeTypeRep (..), eqTypeRep, typeRep)
 
 import DataFrame.Functions (count, mean, meanMaybe, sumMaybe)
 import qualified DataFrame.Functions as Functions
@@ -34,7 +38,7 @@ import DataFrame.IO.CSV (
     readSeparated,
     readTsv,
  )
-import DataFrame.Internal.Column (Column (..))
+import DataFrame.Internal.Column (Column (..), Columnable)
 import DataFrame.Internal.DataFrame (DataFrame, unsafeGetColumn)
 import DataFrame.Internal.Expression (Expr (..), NamedExpr)
 import DataFrame.Operations.Aggregation (aggregate, groupBy)
@@ -111,16 +115,38 @@ executePlan (Sort cols ascending node) = do
 executePlan (Limit k node) =
     Subset.take k <$> executePlan node
 
--- | Build a SortOrder from a column's runtime type.
+{- | Build a SortOrder from a column's runtime type.
+Uses type dispatch to recover Ord for known column types.
+-}
 mkSortOrder :: Bool -> T.Text -> Column -> SortOrder
-mkSortOrder True n (UnboxedColumn Nothing (_ :: VU.Vector a)) = Asc (Col @a n)
-mkSortOrder False n (UnboxedColumn Nothing (_ :: VU.Vector a)) = Desc (Col @a n)
-mkSortOrder True n (UnboxedColumn (Just _) (_ :: VU.Vector a)) = Asc (Col @(Maybe a) n)
-mkSortOrder False n (UnboxedColumn (Just _) (_ :: VU.Vector a)) = Desc (Col @(Maybe a) n)
-mkSortOrder True n (BoxedColumn Nothing (_ :: V.Vector a)) = Asc (Col @a n)
-mkSortOrder False n (BoxedColumn Nothing (_ :: V.Vector a)) = Desc (Col @a n)
-mkSortOrder True n (BoxedColumn (Just _) (_ :: V.Vector a)) = Asc (Col @(Maybe a) n)
-mkSortOrder False n (BoxedColumn (Just _) (_ :: V.Vector a)) = Desc (Col @(Maybe a) n)
+mkSortOrder isAsc name col = dispatchType (columnTypeRep col)
+  where
+    columnTypeRep :: Column -> SomeTypeRep
+    columnTypeRep (UnboxedColumn _ (_ :: VU.Vector a)) = SomeTypeRep (typeRep @a)
+    columnTypeRep (BoxedColumn _ (_ :: V.Vector a)) = SomeTypeRep (typeRep @a)
+    mk :: (Columnable a, Ord a) => Expr a -> SortOrder
+    mk = if isAsc then Asc else Desc
+    dispatchType (SomeTypeRep tr)
+        | Just HRefl <- eqTypeRep tr (typeRep @Int) = mk (Col @Int name)
+        | Just HRefl <- eqTypeRep tr (typeRep @Int8) = mk (Col @Int8 name)
+        | Just HRefl <- eqTypeRep tr (typeRep @Int16) = mk (Col @Int16 name)
+        | Just HRefl <- eqTypeRep tr (typeRep @Int32) = mk (Col @Int32 name)
+        | Just HRefl <- eqTypeRep tr (typeRep @Int64) = mk (Col @Int64 name)
+        | Just HRefl <- eqTypeRep tr (typeRep @Word) = mk (Col @Word name)
+        | Just HRefl <- eqTypeRep tr (typeRep @Word8) = mk (Col @Word8 name)
+        | Just HRefl <- eqTypeRep tr (typeRep @Word16) = mk (Col @Word16 name)
+        | Just HRefl <- eqTypeRep tr (typeRep @Word32) = mk (Col @Word32 name)
+        | Just HRefl <- eqTypeRep tr (typeRep @Word64) = mk (Col @Word64 name)
+        | Just HRefl <- eqTypeRep tr (typeRep @Integer) = mk (Col @Integer name)
+        | Just HRefl <- eqTypeRep tr (typeRep @Double) = mk (Col @Double name)
+        | Just HRefl <- eqTypeRep tr (typeRep @Float) = mk (Col @Float name)
+        | Just HRefl <- eqTypeRep tr (typeRep @Bool) = mk (Col @Bool name)
+        | Just HRefl <- eqTypeRep tr (typeRep @Char) = mk (Col @Char name)
+        | Just HRefl <- eqTypeRep tr (typeRep @T.Text) = mk (Col @T.Text name)
+        | Just HRefl <- eqTypeRep tr (typeRep @String) = mk (Col @String name)
+        | Just HRefl <- eqTypeRep tr (typeRep @BS.ByteString) =
+            mk (Col @BS.ByteString name)
+        | otherwise = error $ "mkSortOrder: unsupported column type: " ++ show tr
 
 -- | Dispatch aggregation by fn name and runtime column type.
 buildNamedExpr :: DataFrame -> AggSpec -> IO NamedExpr

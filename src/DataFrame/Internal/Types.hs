@@ -19,7 +19,7 @@ import Data.Typeable (Typeable)
 import qualified Data.Vector.Unboxed as VU
 import Data.Word (Word16, Word32, Word64, Word8)
 
-type Columnable' a = (Typeable a, Show a, Ord a, Eq a, Read a)
+type Columnable' a = (Typeable a, Show a, Eq a)
 
 {- | A type with column representations used to select the
 "right" representation when specializing the `toColumn` function.

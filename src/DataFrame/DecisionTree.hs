@@ -3,6 +3,7 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -20,21 +21,81 @@ import DataFrame.Operations.Subset (exclude, filterWhere)
 
 import Control.Exception (throw)
 import Control.Monad (guard)
-import Data.Containers.ListUtils (nubOrd)
 import Data.Function (on)
 #if MIN_VERSION_base(4,20,0)
-import Data.List (maximumBy, minimumBy, sort, sortBy)
+import Data.List (maximumBy, minimumBy, nub, sort, sortBy)
 #else
-import Data.List (foldl', maximumBy, minimumBy, sort, sortBy)
+import Data.List (foldl', maximumBy, minimumBy, nub, sort, sortBy)
 #endif
+import Data.Int (Int16, Int32, Int64, Int8)
 import qualified Data.Map.Strict as M
+import Data.Proxy (Proxy (..))
 import qualified Data.Text as T
 import Data.Type.Equality
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
-import Type.Reflection (typeRep)
+import Data.Word (Word, Word16, Word32, Word64, Word8)
+import Type.Reflection (SomeTypeRep (..), eqTypeRep, typeRep)
 
 import DataFrame.Operators
+
+{- | Declares which column types support ordering for decision tree splits.
+
+Use 'orderable' to register a type, and '<>' to combine:
+
+@
+defaultTreeConfig
+    { columnOrdering = defaultColumnOrdering <> orderable \@MyCustomType
+    }
+@
+-}
+newtype ColumnOrdering = ColumnOrdering (M.Map SomeTypeRep OrdDict)
+
+instance Semigroup ColumnOrdering where
+    ColumnOrdering a <> ColumnOrdering b = ColumnOrdering (a <> b)
+
+instance Monoid ColumnOrdering where
+    mempty = ColumnOrdering M.empty
+
+-- | Register a type as orderable for decision tree splits.
+orderable :: forall a. (Columnable a, Ord a) => ColumnOrdering
+orderable = ColumnOrdering (M.singleton (SomeTypeRep (typeRep @a)) (OrdDict (Proxy @a)))
+
+-- | All standard numeric, text, and primitive types.
+defaultColumnOrdering :: ColumnOrdering
+defaultColumnOrdering =
+    mconcat
+        [ orderable @Int
+        , orderable @Int8
+        , orderable @Int16
+        , orderable @Int32
+        , orderable @Int64
+        , orderable @Word
+        , orderable @Word8
+        , orderable @Word16
+        , orderable @Word32
+        , orderable @Word64
+        , orderable @Integer
+        , orderable @Double
+        , orderable @Float
+        , orderable @Bool
+        , orderable @Char
+        , orderable @T.Text
+        , orderable @String
+        ]
+
+-- Internal: existential Ord dictionary.
+data OrdDict where
+    OrdDict :: (Columnable a, Ord a) => Proxy a -> OrdDict
+
+-- Internal: look up Ord for type @a@.
+withOrdFrom ::
+    forall a r. (Columnable a) => ColumnOrdering -> ((Ord a) => r) -> Maybe r
+withOrdFrom (ColumnOrdering m) k = case M.lookup (SomeTypeRep (typeRep @a)) m of
+    Just (OrdDict (_ :: Proxy b)) -> case testEquality (typeRep @a) (typeRep @b) of
+        Just Refl -> Just k
+        Nothing -> Nothing
+    Nothing -> Nothing
 
 data TreeConfig = TreeConfig
     { maxTreeDepth :: Int
@@ -45,8 +106,8 @@ data TreeConfig = TreeConfig
     , synthConfig :: SynthConfig
     , taoIterations :: Int
     , taoConvergenceTol :: Double
+    , columnOrdering :: ColumnOrdering
     }
-    deriving (Eq, Show)
 
 data SynthConfig = SynthConfig
     { maxExprDepth :: Int
@@ -82,6 +143,7 @@ defaultTreeConfig =
         , synthConfig = defaultSynthConfig
         , taoIterations = 10
         , taoConvergenceTol = 1e-6
+        , columnOrdering = defaultColumnOrdering
         }
 
 data Tree a
@@ -101,7 +163,7 @@ treeToExpr (Branch cond left right) =
 -- | Fit a TAO decision tree
 fitDecisionTree ::
     forall a.
-    (Columnable a) =>
+    (Columnable a, Ord a) =>
     TreeConfig ->
     Expr a ->
     DataFrame ->
@@ -109,7 +171,7 @@ fitDecisionTree ::
 fitDecisionTree cfg (Col target) df =
     let
         conds =
-            nubOrd $
+            nub $
                 numericConditions cfg (exclude [target] df)
                     ++ generateConditionsOld cfg (exclude [target] df)
 
@@ -124,7 +186,7 @@ fitDecisionTree _ expr _ = error $ "Cannot create tree for compound expression: 
 
 taoOptimize ::
     forall a.
-    (Columnable a) =>
+    (Columnable a, Ord a) =>
     TreeConfig ->
     T.Text -> -- Target column name
     [Expr Bool] -> -- Candidate conditions
@@ -151,7 +213,7 @@ taoOptimize cfg target conds df rootIndices initialTree =
 
 taoIteration ::
     forall a.
-    (Columnable a) =>
+    (Columnable a, Ord a) =>
     TreeConfig ->
     T.Text ->
     [Expr Bool] ->
@@ -168,7 +230,7 @@ taoIteration cfg target conds df rootIndices tree =
 
 optimizeDepthLevel ::
     forall a.
-    (Columnable a) =>
+    (Columnable a, Ord a) =>
     TreeConfig ->
     T.Text ->
     [Expr Bool] ->
@@ -181,7 +243,7 @@ optimizeDepthLevel cfg target conds df rootIndices tree = optimizeAtDepth @a cfg
 
 optimizeAtDepth ::
     forall a.
-    (Columnable a) =>
+    (Columnable a, Ord a) =>
     TreeConfig ->
     T.Text ->
     [Expr Bool] ->
@@ -224,7 +286,7 @@ optimizeAtDepth cfg target conds df indices tree currentDepth targetDepth
 
 optimizeNode ::
     forall a.
-    (Columnable a) =>
+    (Columnable a, Ord a) =>
     TreeConfig ->
     T.Text ->
     [Expr Bool] ->
@@ -403,7 +465,7 @@ partitionIndices cond df indices =
 
 majorityValueFromIndices ::
     forall a.
-    (Columnable a) =>
+    (Columnable a, Ord a) =>
     T.Text ->
     DataFrame ->
     V.Vector Int ->
@@ -476,7 +538,7 @@ pruneExpr e = e
 
 buildGreedyTree ::
     forall a.
-    (Columnable a) =>
+    (Columnable a, Ord a) =>
     TreeConfig ->
     Int ->
     T.Text ->
@@ -501,7 +563,7 @@ buildGreedyTree cfg depth target conds df
 
 findBestGreedySplit ::
     forall a.
-    (Columnable a) =>
+    (Columnable a, Ord a) =>
     TreeConfig -> T.Text -> [Expr Bool] -> DataFrame -> Maybe (Expr Bool)
 findBestGreedySplit cfg target conds df =
     let
@@ -701,19 +763,21 @@ boolExprs df baseExprs prevExprs depth maxDepth
 generateConditionsOld :: TreeConfig -> DataFrame -> [Expr Bool]
 generateConditionsOld cfg df =
     let
+        ords = columnOrdering cfg
         genConds :: T.Text -> [Expr Bool]
         genConds colName = case unsafeGetColumn colName df of
             (BoxedColumn Nothing (col :: V.Vector a)) ->
-                let ps = map (Lit . (`percentileOrd'` col)) [1, 25, 75, 99]
-                 in map (F.lift2 (==) (Col @a colName)) ps
+                case withOrdFrom @a ords (map (Lit . (`percentileOrd'` col)) [1, 25, 75, 99]) of
+                    Just ps -> map (F.lift2 (==) (Col @a colName)) ps
+                    Nothing -> []
             (BoxedColumn (Just _) (col :: V.Vector a)) -> case sFloating @a of
                 STrue -> [] -- handled by numericCols / numericExprs
                 SFalse -> case sIntegral @a of
                     STrue -> [] -- handled by numericCols / numericExprs
                     SFalse ->
-                        map
-                            (F.lift2 (==) (Col @(Maybe a) colName) . Lit . Just . (`percentileOrd'` col))
-                            [1, 25, 75, 99]
+                        case withOrdFrom @a ords (map (Lit . Just . (`percentileOrd'` col)) [1, 25, 75, 99]) of
+                            Just ps -> map (F.lift2 (==) (Col @(Maybe a) colName)) ps
+                            Nothing -> []
             (UnboxedColumn _ (_ :: VU.Vector a)) -> []
 
         columnConds =
@@ -743,9 +807,10 @@ generateConditionsOld cfg df =
                         Nothing -> []
                         Just Refl -> case testEquality (typeRep @a) (typeRep @T.Text) of
                             Nothing ->
-                                [ F.lift2 (<=) (Col @(Maybe a) l) (Col r)
-                                , F.lift2 (==) (Col @(Maybe a) l) (Col r)
-                                ]
+                                case withOrdFrom @a ords [F.lift2 (<=) (Col @(Maybe a) l) (Col r)] of
+                                    Just leExprs ->
+                                        leExprs ++ [F.lift2 (==) (Col @(Maybe a) l) (Col r)]
+                                    Nothing -> [F.lift2 (==) (Col @(Maybe a) l) (Col r)]
                             Just Refl -> [F.lift2 (==) (Col @(Maybe a) l) (Col r)]
                 _ -> []
      in
@@ -754,7 +819,8 @@ generateConditionsOld cfg df =
 partitionDataFrame :: Expr Bool -> DataFrame -> (DataFrame, DataFrame)
 partitionDataFrame cond df = (filterWhere cond df, filterWhere (F.not cond) df)
 
-calculateGini :: forall a. (Columnable a) => T.Text -> DataFrame -> Double
+calculateGini ::
+    forall a. (Columnable a, Ord a) => T.Text -> DataFrame -> Double
 calculateGini target df =
     let n = fromIntegral $ nRows df
         counts = getCounts @a target df
@@ -762,14 +828,15 @@ calculateGini target df =
         probs = map (\c -> (fromIntegral c + 1) / (n + numClasses)) (M.elems counts)
      in if n == 0 then 0 else 1 - sum (map (^ 2) probs)
 
-majorityValue :: forall a. (Columnable a) => T.Text -> DataFrame -> a
+majorityValue :: forall a. (Columnable a, Ord a) => T.Text -> DataFrame -> a
 majorityValue target df =
     let counts = getCounts @a target df
      in if M.null counts
             then error "Empty DataFrame in leaf"
             else fst $ maximumBy (compare `on` snd) (M.toList counts)
 
-getCounts :: forall a. (Columnable a) => T.Text -> DataFrame -> M.Map a Int
+getCounts ::
+    forall a. (Columnable a, Ord a) => T.Text -> DataFrame -> M.Map a Int
 getCounts target df =
     case interpret @a df (Col target) of
         Left e -> throw e
@@ -793,7 +860,7 @@ percentile p expr df =
 
 buildTree ::
     forall a.
-    (Columnable a) =>
+    (Columnable a, Ord a) =>
     TreeConfig ->
     Int ->
     T.Text ->
@@ -810,7 +877,7 @@ buildTree cfg depth target conds df =
 
 findBestSplit ::
     forall a.
-    (Columnable a) =>
+    (Columnable a, Ord a) =>
     TreeConfig -> T.Text -> [Expr Bool] -> DataFrame -> Maybe (Expr Bool)
 findBestSplit = findBestGreedySplit @a
 
@@ -823,7 +890,7 @@ type ProbTree a = Tree (M.Map a Double)
 -- | Compute normalised class probabilities from a subset of training rows.
 probsFromIndices ::
     forall a.
-    (Columnable a) =>
+    (Columnable a, Ord a) =>
     T.Text ->
     DataFrame ->
     V.Vector Int ->
@@ -849,7 +916,7 @@ probsFromIndices target df indices =
 -}
 buildProbTree ::
     forall a.
-    (Columnable a) =>
+    (Columnable a, Ord a) =>
     Tree a ->
     T.Text ->
     DataFrame ->
@@ -879,7 +946,7 @@ buildProbTree (Branch cond left right) target df indices =
 -}
 fitProbTree ::
     forall a.
-    (Columnable a) =>
+    (Columnable a, Ord a) =>
     TreeConfig ->
     Expr a -> -- target column, e.g. @Col \"label\"@
     DataFrame ->
@@ -887,7 +954,7 @@ fitProbTree ::
 fitProbTree cfg (Col target) df =
     let
         conds =
-            nubOrd $
+            nub $
                 numericConditions cfg (exclude [target] df)
                     ++ generateConditionsOld cfg (exclude [target] df)
         initialTree = buildGreedyTree @a cfg (maxTreeDepth cfg) target conds df
@@ -915,11 +982,11 @@ fitProbTree _ expr _ =
 -}
 probExprs ::
     forall a.
-    (Columnable a) =>
+    (Columnable a, Ord a) =>
     ProbTree a ->
     M.Map a (Expr Double)
 probExprs tree =
-    let classes = nubOrd (allClasses tree)
+    let classes = nub (allClasses tree)
      in M.fromList [(c, classExpr c tree) | c <- classes]
   where
     allClasses :: ProbTree a -> [a]

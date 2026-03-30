@@ -556,14 +556,14 @@ collect (TExpr e) = TExpr (Agg (FoldAgg "collect" (Just []) (flip (:))) e)
 
 castExpr ::
     forall b cols src.
-    (Columnable b, Columnable src) => TExpr cols src -> TExpr cols (Maybe b)
+    (Columnable b, Columnable src, Read b) => TExpr cols src -> TExpr cols (Maybe b)
 castExpr (TExpr e) =
     TExpr
         (CastExprWith @b @(Maybe b) @src "castExpr" (either (const Nothing) Just) e)
 
 castExprWithDefault ::
     forall b cols src.
-    (Columnable b, Columnable src) => b -> TExpr cols src -> TExpr cols b
+    (Columnable b, Columnable src, Read b) => b -> TExpr cols src -> TExpr cols b
 castExprWithDefault def (TExpr e) =
     TExpr
         ( CastExprWith @b @b @src
@@ -574,7 +574,8 @@ castExprWithDefault def (TExpr e) =
 
 castExprEither ::
     forall b cols src.
-    (Columnable b, Columnable src) => TExpr cols src -> TExpr cols (Either T.Text b)
+    (Columnable b, Columnable src, Read b) =>
+    TExpr cols src -> TExpr cols (Either T.Text b)
 castExprEither (TExpr e) =
     TExpr
         ( CastExprWith @b @(Either T.Text b) @src
@@ -585,7 +586,7 @@ castExprEither (TExpr e) =
 
 unsafeCastExpr ::
     forall b cols src.
-    (Columnable b, Columnable src) => TExpr cols src -> TExpr cols b
+    (Columnable b, Columnable src, Read b) => TExpr cols src -> TExpr cols b
 unsafeCastExpr (TExpr e) =
     TExpr
         ( CastExprWith @b @b @src
@@ -603,9 +604,9 @@ as :: (Columnable a) => TExpr cols a -> T.Text -> NamedExpr
 as (TExpr e) name = (name, UExpr e)
 
 -- | Create an ascending sort order from a typed expression.
-asc :: (Columnable a) => TExpr cols a -> TSortOrder cols
+asc :: (Columnable a, Ord a) => TExpr cols a -> TSortOrder cols
 asc = Asc
 
 -- | Create a descending sort order from a typed expression.
-desc :: (Columnable a) => TExpr cols a -> TSortOrder cols
+desc :: (Columnable a, Ord a) => TExpr cols a -> TSortOrder cols
 desc = Desc

@@ -207,6 +207,10 @@ null df = V.null (columns df)
 toCsv :: DataFrame -> T.Text
 toCsv = toSeparated ','
 
+-- | Convert a DataFrame to a CSV (comma-separated) string.
+toCsv' :: DataFrame -> String
+toCsv' = T.unpack . toSeparated ','
+
 -- | Convert a DataFrame to a text representation with a custom separator.
 toSeparated :: Char -> DataFrame -> T.Text
 toSeparated sep df

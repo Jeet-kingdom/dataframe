@@ -28,12 +28,10 @@ import qualified DataFrame.Operations.Statistics as Stats
 import DataFrame.Operations.Subset (exclude)
 
 import Control.Exception (throw)
-import Data.Containers.ListUtils
 import Data.Function
 import qualified Data.List as L
 import qualified Data.Map as M
 import Data.Maybe (listToMaybe)
-import qualified Data.Set as S
 import qualified Data.Text as T
 import Data.Type.Equality
 import qualified Data.Vector.Unboxed as VU
@@ -165,13 +163,13 @@ deduplicate ::
     DataFrame ->
     [Expr a] ->
     [(Expr a, TypedColumn a)]
-deduplicate df = go S.empty . nubOrd . L.sortBy (\e1 e2 -> compare (eSize e1) (eSize e2))
+deduplicate df = go [] . L.nub . L.sortBy (\e1 e2 -> compare (eSize e1) (eSize e2))
   where
     go _ [] = []
     go seen (x : xs)
         | hasInvalid = go seen xs
-        | S.member res seen = go seen xs
-        | otherwise = (x, res) : go (S.insert res seen) xs
+        | res `elem` seen = go seen xs
+        | otherwise = (x, res) : go (res : seen) xs
       where
         res = case interpret @a df x of
             Left e -> throw e

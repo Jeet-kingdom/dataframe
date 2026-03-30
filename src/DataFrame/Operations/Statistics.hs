@@ -60,7 +60,8 @@ ghci> D.frequencies "ocean_proximity" df
  Percentage (%) | 44.26%    | 31.74% | 0.02%  | 11.09%   | 12.88%
 @
 -}
-frequencies :: forall a. (Columnable a) => Expr a -> DataFrame -> DataFrame
+frequencies ::
+    forall a. (Columnable a, Ord a) => Expr a -> DataFrame -> DataFrame
 frequencies expr df =
     let
         counts = valueCounts expr df

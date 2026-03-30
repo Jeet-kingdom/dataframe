@@ -13,12 +13,10 @@ import Control.Applicative (many, (<|>))
 import Data.Attoparsec.Text hiding (decimal, double, signed)
 import Data.ByteString.Lex.Fractional
 import Data.Foldable (fold)
-import Data.Maybe (fromMaybe)
 import Data.Text.Read (decimal, double, signed)
 import Data.Time (Day, defaultTimeLocale, parseTimeM)
 import GHC.Stack (HasCallStack)
 import System.IO (Handle, IOMode (..), hIsEOF, hTell, withFile)
-import Text.Read (readMaybe)
 import Prelude hiding (takeWhile)
 
 isNullish :: T.Text -> Bool
@@ -40,11 +38,6 @@ isTrueish t = t `elem` ["True", "true", "TRUE"]
 
 isFalseish :: T.Text -> Bool
 isFalseish t = t `elem` ["False", "false", "FALSE"]
-
-readValue :: (HasCallStack, Read a) => T.Text -> a
-readValue s = case readMaybe (T.unpack s) of
-    Nothing -> error ("Could not read value: " <> T.unpack s)
-    Just value -> value
 
 readBool :: (HasCallStack) => T.Text -> Maybe Bool
 readBool s
@@ -121,12 +114,6 @@ readDoubleEither s =
         Right (value, "") -> Right value
         Right (value, _) -> Left s
 {-# INLINE readDoubleEither #-}
-
-safeReadValue :: (Read a) => T.Text -> Maybe a
-safeReadValue s = readMaybe (T.unpack s)
-
-readWithDefault :: (HasCallStack, Read a) => a -> T.Text -> a
-readWithDefault v s = fromMaybe v (readMaybe (T.unpack s))
 
 -- ---------------------------------------------------------------------------
 -- Attoparsec CSV parser combinators (shared between Lazy.IO.CSV and others)

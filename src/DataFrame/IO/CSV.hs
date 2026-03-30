@@ -13,7 +13,6 @@ module DataFrame.IO.CSV where
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as BL
-import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import qualified Data.Proxy as P
 import qualified Data.Text as T
@@ -32,7 +31,6 @@ import Control.Monad
 import Data.Char
 import qualified Data.Csv as Csv
 import Data.Either
-import Data.Function (on)
 import Data.Functor
 import Data.IORef
 import Data.Maybe

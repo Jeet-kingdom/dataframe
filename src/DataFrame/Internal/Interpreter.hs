@@ -253,7 +253,7 @@ Numeric coercion handles Double, Float, and Int targets.  Text columns
 -}
 promoteColumnWith ::
     forall a b.
-    (Columnable a, Columnable b) =>
+    (Columnable a, Columnable b, Read a) =>
     (Either String a -> b) -> Column -> Either DataFrameException Column
 promoteColumnWith onResult col
     | hasElemType @b col = Right col
@@ -395,7 +395,7 @@ parseWith f s = case reads s of
 
 tryParseWith ::
     forall a b.
-    (Columnable a, Columnable b) =>
+    (Columnable a, Columnable b, Read a) =>
     (Either String a -> b) -> Column -> Either DataFrameException Column
 tryParseWith onResult col = case col of
     BoxedColumn bm (v :: V.Vector c) ->

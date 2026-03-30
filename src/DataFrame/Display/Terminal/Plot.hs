@@ -10,6 +10,7 @@
 module DataFrame.Display.Terminal.Plot where
 
 import Control.Monad
+import qualified Data.Bifunctor
 import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Text as T
@@ -18,9 +19,10 @@ import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
 import qualified Data.Vector as V
 import qualified Data.Vector.Generic as VG
 import qualified Data.Vector.Unboxed as VU
+import Data.Word (Word8)
 import DataFrame.Internal.Types
 import GHC.Stack (HasCallStack)
-import Type.Reflection (typeRep)
+import Type.Reflection (TypeRep, typeRep)
 
 import DataFrame.Internal.Column (Column (..), Columnable, isNumeric)
 import qualified DataFrame.Internal.Column as D
@@ -339,18 +341,54 @@ getCategoricalCounts colName df =
         Just idx ->
             let col = columns df V.! idx
              in case col of
-                    BoxedColumn _ vec ->
-                        let counts = countValues vec
-                         in Just [(T.pack (show k), fromIntegral v) | (k, v) <- counts]
-                    UnboxedColumn _ vec ->
-                        let counts = countValuesUnboxed vec
-                         in Just [(T.pack (show k), fromIntegral v) | (k, v) <- counts]
+                    BoxedColumn _ (vec :: V.Vector a) ->
+                        Just (countBoxed (typeRep @a) vec)
+                    UnboxedColumn _ (vec :: VU.Vector a) ->
+                        Just (countUnboxed (typeRep @a) vec)
   where
-    countValues :: (Ord a, Show a) => V.Vector a -> [(a, Int)]
+    countBoxed ::
+        forall a. (Show a) => TypeRep a -> V.Vector a -> [(T.Text, Double)]
+    countBoxed tr vec
+        | Just Refl <- testEquality tr (typeRep @T.Text) = toPairs $ countValues vec
+        | Just Refl <- testEquality tr (typeRep @String) = toPairs $ countValues vec
+        | Just Refl <- testEquality tr (typeRep @Integer) = toPairs $ countValues vec
+        | Just Refl <- testEquality tr (typeRep @Int) = toPairs $ countValues vec
+        | Just Refl <- testEquality tr (typeRep @Double) = toPairs $ countValues vec
+        | Just Refl <- testEquality tr (typeRep @Float) = toPairs $ countValues vec
+        | Just Refl <- testEquality tr (typeRep @Bool) = toPairs $ countValues vec
+        | Just Refl <- testEquality tr (typeRep @Char) = toPairs $ countValues vec
+        | otherwise = countByShow $ V.toList vec
+
+    countUnboxed ::
+        forall a. (Show a, VU.Unbox a) => TypeRep a -> VU.Vector a -> [(T.Text, Double)]
+    countUnboxed tr vec
+        | Just Refl <- testEquality tr (typeRep @Int) = toPairs $ countValuesUnboxed vec
+        | Just Refl <- testEquality tr (typeRep @Double) =
+            toPairs $ countValuesUnboxed vec
+        | Just Refl <- testEquality tr (typeRep @Float) =
+            toPairs $ countValuesUnboxed vec
+        | Just Refl <- testEquality tr (typeRep @Bool) =
+            toPairs $ countValuesUnboxed vec
+        | Just Refl <- testEquality tr (typeRep @Char) =
+            toPairs $ countValuesUnboxed vec
+        | Just Refl <- testEquality tr (typeRep @Word8) =
+            toPairs $ countValuesUnboxed vec
+        | otherwise = countByShow $ VU.toList vec
+
+    toPairs :: (Show a) => [(a, Int)] -> [(T.Text, Double)]
+    toPairs = map (\(k, v) -> (T.pack (show k), fromIntegral v))
+
+    countValues :: (Ord a) => V.Vector a -> [(a, Int)]
     countValues vec = M.toList $ V.foldr' (\x acc -> M.insertWith (+) x 1 acc) M.empty vec
 
-    countValuesUnboxed :: (Ord a, Show a, VU.Unbox a) => VU.Vector a -> [(a, Int)]
+    countValuesUnboxed :: (Ord a, VU.Unbox a) => VU.Vector a -> [(a, Int)]
     countValuesUnboxed vec = M.toList $ VU.foldr' (\x acc -> M.insertWith (+) x 1 acc) M.empty vec
+
+    countByShow :: (Show a) => [a] -> [(T.Text, Double)]
+    countByShow xs =
+        map (Data.Bifunctor.bimap T.pack fromIntegral) $
+            M.toList $
+                L.foldl' (\acc x -> M.insertWith (+) (show x) 1 acc) M.empty xs
 
 isNumericColumnCheck :: T.Text -> DataFrame -> Bool
 isNumericColumnCheck colName df = isNumericColumn df colName

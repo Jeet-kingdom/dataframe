@@ -20,7 +20,6 @@ module DataFrame.Internal.Column where
 
 import qualified Data.Text as T
 import qualified Data.Vector as VB
-import qualified Data.Vector.Algorithms.Merge as VA
 import qualified Data.Vector.Generic as VG
 import qualified Data.Vector.Mutable as VBM
 import qualified Data.Vector.Unboxed as VU
@@ -214,10 +213,6 @@ instance (Eq a) => Eq (TypedColumn a) where
     (==) :: (Eq a) => TypedColumn a -> TypedColumn a -> Bool
     (==) (TColumn a) (TColumn b) = a == b
 
-instance (Ord a) => Ord (TypedColumn a) where
-    compare :: (Ord a) => TypedColumn a -> TypedColumn a -> Ordering
-    compare (TColumn a) (TColumn b) = compare a b
-
 -- | Gets the underlying value from a TypedColumn.
 unwrapTypedColumn :: TypedColumn a -> Column
 unwrapTypedColumn (TColumn value) = value
@@ -369,19 +364,6 @@ instance Eq Column where
                             a
                         )
     (==) _ _ = False
-
--- Generalised LEQ that does reflection.
-generalLEQ ::
-    forall a b. (Typeable a, Typeable b, Ord a, Ord b) => a -> b -> Bool
-generalLEQ x y = case testEquality (typeRep @a) (typeRep @b) of
-    Nothing -> False
-    Just Refl -> x <= y
-
-instance Ord Column where
-    (<=) :: Column -> Column -> Bool
-    (<=) (BoxedColumn _ (a :: VB.Vector t1)) (BoxedColumn _ (b :: VB.Vector t2)) = generalLEQ a b
-    (<=) (UnboxedColumn _ (a :: VU.Vector t1)) (UnboxedColumn _ (b :: VU.Vector t2)) = generalLEQ a b
-    (<=) _ _ = False
 
 {- | A class for converting a vector to a column of the appropriate type.
 Given each Rep we tell the `toColumnRep` function which Column type to pick.
@@ -729,23 +711,6 @@ findIndices pred = \case
                         , callingFunctionName = Just "findIndices"
                         , errorColumnName = Nothing
                         }
-
--- | An internal function that returns a vector of how indexes change after a column is sorted.
-sortedIndexes :: Bool -> Column -> VU.Vector Int
-sortedIndexes asc = \case
-    BoxedColumn _ column -> sortWorker VG.convert column
-    UnboxedColumn _ column -> sortWorker id column
-  where
-    sortWorker ::
-        (VG.Vector v a, Ord a, VG.Vector v (Int, a), VG.Vector v Int) =>
-        (v Int -> VU.Vector Int) -> v a -> VU.Vector Int
-    sortWorker finalize column = runST $ do
-        withIndexes <- VG.thaw $ VG.indexed column
-        let cmp = if asc then compare else flip compare
-        VA.sortBy (\(_, b) (_, b') -> cmp b b') withIndexes
-        sorted <- VG.unsafeFreeze withIndexes
-        return $ finalize $ VG.map fst sorted
-{-# INLINE sortedIndexes #-}
 
 -- | Fold (right) column with index.
 ifoldrColumn ::
