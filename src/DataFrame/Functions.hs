@@ -232,9 +232,21 @@ not =
 
 count :: (Columnable a) => Expr a -> Expr Int
 count = Agg (MergeAgg "count" (0 :: Int) (\c _ -> c + 1) (+) id)
+{-# SPECIALIZE count :: Expr Double -> Expr Int #-}
+{-# SPECIALIZE count :: Expr Float -> Expr Int #-}
+{-# SPECIALIZE count :: Expr Int -> Expr Int #-}
+{-# SPECIALIZE count :: Expr Int8 -> Expr Int #-}
+{-# SPECIALIZE count :: Expr Int16 -> Expr Int #-}
+{-# SPECIALIZE count :: Expr Int32 -> Expr Int #-}
+{-# SPECIALIZE count :: Expr Int64 -> Expr Int #-}
+{-# INLINEABLE count #-}
 
 collect :: (Columnable a) => Expr a -> Expr [a]
 collect = Agg (FoldAgg "collect" (Just []) (flip (:)))
+{-# SPECIALIZE collect :: Expr Double -> Expr [Double] #-}
+{-# SPECIALIZE collect :: Expr Float -> Expr [Float] #-}
+{-# SPECIALIZE collect :: Expr Int -> Expr [Int] #-}
+{-# INLINEABLE collect #-}
 
 mode :: (Ord a, Columnable a, Eq a) => Expr a -> Expr a
 mode =
@@ -247,21 +259,58 @@ mode =
                 . V.foldl' (\m e -> M.insertWith (+) e 1 m) M.empty
             )
         )
+{-# SPECIALIZE mode :: Expr Double -> Expr Double #-}
+{-# SPECIALIZE mode :: Expr Float -> Expr Float #-}
+{-# SPECIALIZE mode :: Expr Int -> Expr Int #-}
+{-# SPECIALIZE mode :: Expr Int8 -> Expr Int8 #-}
+{-# SPECIALIZE mode :: Expr Int16 -> Expr Int16 #-}
+{-# SPECIALIZE mode :: Expr Int32 -> Expr Int32 #-}
+{-# SPECIALIZE mode :: Expr Int64 -> Expr Int64 #-}
+{-# INLINEABLE mode #-}
 
 minimum :: (Columnable a, Ord a) => Expr a -> Expr a
 minimum = Agg (FoldAgg "minimum" Nothing Prelude.min)
+{-# SPECIALIZE DataFrame.Functions.minimum :: Expr Double -> Expr Double #-}
+{-# SPECIALIZE DataFrame.Functions.minimum :: Expr Float -> Expr Float #-}
+{-# SPECIALIZE DataFrame.Functions.minimum :: Expr Int -> Expr Int #-}
+{-# SPECIALIZE DataFrame.Functions.minimum :: Expr Int8 -> Expr Int8 #-}
+{-# SPECIALIZE DataFrame.Functions.minimum :: Expr Int16 -> Expr Int16 #-}
+{-# SPECIALIZE DataFrame.Functions.minimum :: Expr Int32 -> Expr Int32 #-}
+{-# SPECIALIZE DataFrame.Functions.minimum :: Expr Int64 -> Expr Int64 #-}
+{-# INLINEABLE DataFrame.Functions.minimum #-}
 
 maximum :: (Columnable a, Ord a) => Expr a -> Expr a
 maximum = Agg (FoldAgg "maximum" Nothing Prelude.max)
+{-# SPECIALIZE DataFrame.Functions.maximum :: Expr Double -> Expr Double #-}
+{-# SPECIALIZE DataFrame.Functions.maximum :: Expr Float -> Expr Float #-}
+{-# SPECIALIZE DataFrame.Functions.maximum :: Expr Int -> Expr Int #-}
+{-# SPECIALIZE DataFrame.Functions.maximum :: Expr Int8 -> Expr Int8 #-}
+{-# SPECIALIZE DataFrame.Functions.maximum :: Expr Int16 -> Expr Int16 #-}
+{-# SPECIALIZE DataFrame.Functions.maximum :: Expr Int32 -> Expr Int32 #-}
+{-# SPECIALIZE DataFrame.Functions.maximum :: Expr Int64 -> Expr Int64 #-}
+{-# INLINEABLE DataFrame.Functions.maximum #-}
 
 sum :: forall a. (Columnable a, Num a) => Expr a -> Expr a
 sum = Agg (FoldAgg "sum" Nothing (+))
 {-# SPECIALIZE DataFrame.Functions.sum :: Expr Double -> Expr Double #-}
+{-# SPECIALIZE DataFrame.Functions.sum :: Expr Float -> Expr Float #-}
 {-# SPECIALIZE DataFrame.Functions.sum :: Expr Int -> Expr Int #-}
+{-# SPECIALIZE DataFrame.Functions.sum :: Expr Int8 -> Expr Int8 #-}
+{-# SPECIALIZE DataFrame.Functions.sum :: Expr Int16 -> Expr Int16 #-}
+{-# SPECIALIZE DataFrame.Functions.sum :: Expr Int32 -> Expr Int32 #-}
+{-# SPECIALIZE DataFrame.Functions.sum :: Expr Int64 -> Expr Int64 #-}
 {-# INLINEABLE DataFrame.Functions.sum #-}
 
 sumMaybe :: forall a. (Columnable a, Num a) => Expr (Maybe a) -> Expr a
 sumMaybe = Agg (CollectAgg "sumMaybe" (P.sum . Maybe.catMaybes . V.toList))
+{-# SPECIALIZE sumMaybe :: Expr (Maybe Double) -> Expr Double #-}
+{-# SPECIALIZE sumMaybe :: Expr (Maybe Float) -> Expr Float #-}
+{-# SPECIALIZE sumMaybe :: Expr (Maybe Int) -> Expr Int #-}
+{-# SPECIALIZE sumMaybe :: Expr (Maybe Int8) -> Expr Int8 #-}
+{-# SPECIALIZE sumMaybe :: Expr (Maybe Int16) -> Expr Int16 #-}
+{-# SPECIALIZE sumMaybe :: Expr (Maybe Int32) -> Expr Int32 #-}
+{-# SPECIALIZE sumMaybe :: Expr (Maybe Int64) -> Expr Int64 #-}
+{-# INLINEABLE sumMaybe #-}
 
 mean :: (Columnable a, Real a) => Expr a -> Expr Double
 mean =
@@ -273,18 +322,58 @@ mean =
             (\(MeanAcc s1 c1) (MeanAcc s2 c2) -> MeanAcc (s1 + s2) (c1 + c2))
             (\(MeanAcc s c) -> if c == 0 then 0 / 0 else s / fromIntegral c)
         )
+{-# SPECIALIZE mean :: Expr Double -> Expr Double #-}
+{-# SPECIALIZE mean :: Expr Float -> Expr Double #-}
+{-# SPECIALIZE mean :: Expr Int -> Expr Double #-}
+{-# SPECIALIZE mean :: Expr Int8 -> Expr Double #-}
+{-# SPECIALIZE mean :: Expr Int16 -> Expr Double #-}
+{-# SPECIALIZE mean :: Expr Int32 -> Expr Double #-}
+{-# SPECIALIZE mean :: Expr Int64 -> Expr Double #-}
+{-# INLINEABLE mean #-}
 
 meanMaybe :: forall a. (Columnable a, Real a) => Expr (Maybe a) -> Expr Double
 meanMaybe = Agg (CollectAgg "meanMaybe" (mean' . optionalToDoubleVector))
+{-# SPECIALIZE meanMaybe :: Expr (Maybe Double) -> Expr Double #-}
+{-# SPECIALIZE meanMaybe :: Expr (Maybe Float) -> Expr Double #-}
+{-# SPECIALIZE meanMaybe :: Expr (Maybe Int) -> Expr Double #-}
+{-# SPECIALIZE meanMaybe :: Expr (Maybe Int8) -> Expr Double #-}
+{-# SPECIALIZE meanMaybe :: Expr (Maybe Int16) -> Expr Double #-}
+{-# SPECIALIZE meanMaybe :: Expr (Maybe Int32) -> Expr Double #-}
+{-# SPECIALIZE meanMaybe :: Expr (Maybe Int64) -> Expr Double #-}
+{-# INLINEABLE meanMaybe #-}
 
 variance :: (Columnable a, Real a, VU.Unbox a) => Expr a -> Expr Double
 variance = Agg (CollectAgg "variance" variance')
+{-# SPECIALIZE variance :: Expr Double -> Expr Double #-}
+{-# SPECIALIZE variance :: Expr Float -> Expr Double #-}
+{-# SPECIALIZE variance :: Expr Int -> Expr Double #-}
+{-# SPECIALIZE variance :: Expr Int8 -> Expr Double #-}
+{-# SPECIALIZE variance :: Expr Int16 -> Expr Double #-}
+{-# SPECIALIZE variance :: Expr Int32 -> Expr Double #-}
+{-# SPECIALIZE variance :: Expr Int64 -> Expr Double #-}
+{-# INLINEABLE variance #-}
 
 median :: (Columnable a, Real a, VU.Unbox a) => Expr a -> Expr Double
 median = Agg (CollectAgg "median" median')
+{-# SPECIALIZE median :: Expr Double -> Expr Double #-}
+{-# SPECIALIZE median :: Expr Float -> Expr Double #-}
+{-# SPECIALIZE median :: Expr Int -> Expr Double #-}
+{-# SPECIALIZE median :: Expr Int8 -> Expr Double #-}
+{-# SPECIALIZE median :: Expr Int16 -> Expr Double #-}
+{-# SPECIALIZE median :: Expr Int32 -> Expr Double #-}
+{-# SPECIALIZE median :: Expr Int64 -> Expr Double #-}
+{-# INLINEABLE median #-}
 
 medianMaybe :: (Columnable a, Real a) => Expr (Maybe a) -> Expr Double
 medianMaybe = Agg (CollectAgg "meanMaybe" (median' . optionalToDoubleVector))
+{-# SPECIALIZE medianMaybe :: Expr (Maybe Double) -> Expr Double #-}
+{-# SPECIALIZE medianMaybe :: Expr (Maybe Float) -> Expr Double #-}
+{-# SPECIALIZE medianMaybe :: Expr (Maybe Int) -> Expr Double #-}
+{-# SPECIALIZE medianMaybe :: Expr (Maybe Int8) -> Expr Double #-}
+{-# SPECIALIZE medianMaybe :: Expr (Maybe Int16) -> Expr Double #-}
+{-# SPECIALIZE medianMaybe :: Expr (Maybe Int32) -> Expr Double #-}
+{-# SPECIALIZE medianMaybe :: Expr (Maybe Int64) -> Expr Double #-}
+{-# INLINEABLE medianMaybe #-}
 
 optionalToDoubleVector :: (Real a) => V.Vector (Maybe a) -> VU.Vector Double
 optionalToDoubleVector =
@@ -303,55 +392,115 @@ percentile n =
 
 stddev :: (Columnable a, Real a, VU.Unbox a) => Expr a -> Expr Double
 stddev = Agg (CollectAgg "stddev" (sqrt . variance'))
+{-# SPECIALIZE stddev :: Expr Double -> Expr Double #-}
+{-# SPECIALIZE stddev :: Expr Float -> Expr Double #-}
+{-# SPECIALIZE stddev :: Expr Int -> Expr Double #-}
+{-# SPECIALIZE stddev :: Expr Int8 -> Expr Double #-}
+{-# SPECIALIZE stddev :: Expr Int16 -> Expr Double #-}
+{-# SPECIALIZE stddev :: Expr Int32 -> Expr Double #-}
+{-# SPECIALIZE stddev :: Expr Int64 -> Expr Double #-}
+{-# INLINEABLE stddev #-}
 
 stddevMaybe :: forall a. (Columnable a, Real a) => Expr (Maybe a) -> Expr Double
 stddevMaybe = Agg (CollectAgg "stddevMaybe" (sqrt . variance' . optionalToDoubleVector))
+{-# SPECIALIZE stddevMaybe :: Expr (Maybe Double) -> Expr Double #-}
+{-# SPECIALIZE stddevMaybe :: Expr (Maybe Float) -> Expr Double #-}
+{-# SPECIALIZE stddevMaybe :: Expr (Maybe Int) -> Expr Double #-}
+{-# SPECIALIZE stddevMaybe :: Expr (Maybe Int8) -> Expr Double #-}
+{-# SPECIALIZE stddevMaybe :: Expr (Maybe Int16) -> Expr Double #-}
+{-# SPECIALIZE stddevMaybe :: Expr (Maybe Int32) -> Expr Double #-}
+{-# SPECIALIZE stddevMaybe :: Expr (Maybe Int64) -> Expr Double #-}
+{-# INLINEABLE stddevMaybe #-}
 
 zScore :: Expr Double -> Expr Double
 zScore c = (c - mean c) / stddev c
 
 pow :: (Columnable a, Num a) => Expr a -> Int -> Expr a
 pow expr i = lift2Decorated (^) "pow" (Just "^") True 8 expr (Lit i)
+{-# SPECIALIZE pow :: Expr Double -> Int -> Expr Double #-}
+{-# SPECIALIZE pow :: Expr Float -> Int -> Expr Float #-}
+{-# SPECIALIZE pow :: Expr Int -> Int -> Expr Int #-}
+{-# INLINEABLE pow #-}
 
 relu :: (Columnable a, Num a, Ord a) => Expr a -> Expr a
 relu = liftDecorated (Prelude.max 0) "relu" Nothing
+{-# SPECIALIZE relu :: Expr Double -> Expr Double #-}
+{-# SPECIALIZE relu :: Expr Float -> Expr Float #-}
+{-# SPECIALIZE relu :: Expr Int -> Expr Int #-}
+{-# INLINEABLE relu #-}
 
 min :: (Columnable a, Ord a) => Expr a -> Expr a -> Expr a
 min = lift2Decorated Prelude.min "min" Nothing True 1
+{-# SPECIALIZE DataFrame.Functions.min ::
+    Expr Double -> Expr Double -> Expr Double
+    #-}
+{-# SPECIALIZE DataFrame.Functions.min ::
+    Expr Float -> Expr Float -> Expr Float
+    #-}
+{-# SPECIALIZE DataFrame.Functions.min :: Expr Int -> Expr Int -> Expr Int #-}
+{-# INLINEABLE DataFrame.Functions.min #-}
 
 max :: (Columnable a, Ord a) => Expr a -> Expr a -> Expr a
 max = lift2Decorated Prelude.max "max" Nothing True 1
+{-# SPECIALIZE DataFrame.Functions.max ::
+    Expr Double -> Expr Double -> Expr Double
+    #-}
+{-# SPECIALIZE DataFrame.Functions.max ::
+    Expr Float -> Expr Float -> Expr Float
+    #-}
+{-# SPECIALIZE DataFrame.Functions.max :: Expr Int -> Expr Int -> Expr Int #-}
+{-# INLINEABLE DataFrame.Functions.max #-}
 
 reduce ::
     forall a b.
     (Columnable a, Columnable b) => Expr b -> a -> (a -> b -> a) -> Expr a
 reduce expr start f = Agg (FoldAgg "foldUdf" (Just start) f) expr
+{-# INLINEABLE reduce #-}
 
 toMaybe :: (Columnable a) => Expr a -> Expr (Maybe a)
 toMaybe = liftDecorated Just "toMaybe" Nothing
+{-# SPECIALIZE toMaybe :: Expr Double -> Expr (Maybe Double) #-}
+{-# SPECIALIZE toMaybe :: Expr Float -> Expr (Maybe Float) #-}
+{-# SPECIALIZE toMaybe :: Expr Int -> Expr (Maybe Int) #-}
+{-# INLINEABLE toMaybe #-}
 
 fromMaybe :: (Columnable a) => a -> Expr (Maybe a) -> Expr a
 fromMaybe d = liftDecorated (Maybe.fromMaybe d) "fromMaybe" Nothing
+{-# SPECIALIZE fromMaybe :: Double -> Expr (Maybe Double) -> Expr Double #-}
+{-# SPECIALIZE fromMaybe :: Float -> Expr (Maybe Float) -> Expr Float #-}
+{-# SPECIALIZE fromMaybe :: Int -> Expr (Maybe Int) -> Expr Int #-}
+{-# INLINEABLE fromMaybe #-}
 
 isJust :: (Columnable a) => Expr (Maybe a) -> Expr Bool
 isJust = liftDecorated Maybe.isJust "isJust" Nothing
+{-# SPECIALIZE isJust :: Expr (Maybe Double) -> Expr Bool #-}
+{-# SPECIALIZE isJust :: Expr (Maybe Int) -> Expr Bool #-}
+{-# INLINEABLE isJust #-}
 
 isNothing :: (Columnable a) => Expr (Maybe a) -> Expr Bool
 isNothing = liftDecorated Maybe.isNothing "isNothing" Nothing
+{-# SPECIALIZE isNothing :: Expr (Maybe Double) -> Expr Bool #-}
+{-# SPECIALIZE isNothing :: Expr (Maybe Int) -> Expr Bool #-}
+{-# INLINEABLE isNothing #-}
 
 fromJust :: (Columnable a) => Expr (Maybe a) -> Expr a
 fromJust = liftDecorated Maybe.fromJust "fromJust" Nothing
+{-# SPECIALIZE fromJust :: Expr (Maybe Double) -> Expr Double #-}
+{-# SPECIALIZE fromJust :: Expr (Maybe Int) -> Expr Int #-}
+{-# INLINEABLE fromJust #-}
 
 whenPresent ::
     forall a b.
     (Columnable a, Columnable b) => (a -> b) -> Expr (Maybe a) -> Expr (Maybe b)
 whenPresent f = liftDecorated (fmap f) "whenPresent" Nothing
+{-# INLINEABLE whenPresent #-}
 
 whenBothPresent ::
     forall a b c.
     (Columnable a, Columnable b, Columnable c) =>
     (a -> b -> c) -> Expr (Maybe a) -> Expr (Maybe b) -> Expr (Maybe c)
 whenBothPresent f = lift2Decorated (\l r -> f <$> l <*> r) "whenBothPresent" Nothing False 0
+{-# INLINEABLE whenBothPresent #-}
 
 recode ::
     forall a b.

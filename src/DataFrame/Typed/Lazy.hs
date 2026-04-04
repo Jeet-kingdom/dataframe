@@ -4,6 +4,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeApplications #-}
 
 {- |
@@ -72,6 +73,7 @@ module DataFrame.Typed.Lazy (
     SortOrder (..),
 ) where
 
+import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
 import qualified Data.Text as T
 import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
@@ -90,7 +92,7 @@ import DataFrame.Typed.Schema
 import DataFrame.Typed.Types
 
 -- | A lazy query with compile-time schema tracking.
-newtype TypedLazyDataFrame (cols :: [*]) = TLD {unTLD :: LazyDataFrame}
+newtype TypedLazyDataFrame (cols :: [Type]) = TLD {unTLD :: LazyDataFrame}
 
 instance Show (TypedLazyDataFrame cols) where
     show (TLD ldf) = "TypedLazyDataFrame { " ++ show ldf ++ " }"
@@ -152,7 +154,7 @@ select ::
 select (TLD ldf) = TLD (L.select (DataFrame.Typed.Schema.symbolVals @names) ldf)
 
 -- | A typed lazy grouped query.
-newtype TypedLazyGrouped (keys :: [Symbol]) (cols :: [*]) = TLG
+newtype TypedLazyGrouped (keys :: [Symbol]) (cols :: [Type]) = TLG
     { unTLG :: ([T.Text], LazyDataFrame)
     }
 

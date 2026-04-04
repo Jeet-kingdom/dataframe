@@ -41,6 +41,225 @@ import Type.Reflection (
     typeRep,
  )
 
+import Data.Int (Int16, Int32, Int64, Int8)
+
+-- Specializations for common aggregation types to avoid dictionary overhead.
+-- foldLinearGroups: mean accumulator
+{-# SPECIALIZE foldLinearGroups ::
+    (MeanAcc -> Double -> MeanAcc) ->
+    MeanAcc ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (MeanAcc -> Float -> MeanAcc) ->
+    MeanAcc ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (MeanAcc -> Int -> MeanAcc) ->
+    MeanAcc ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (MeanAcc -> Int8 -> MeanAcc) ->
+    MeanAcc ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (MeanAcc -> Int16 -> MeanAcc) ->
+    MeanAcc ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (MeanAcc -> Int32 -> MeanAcc) ->
+    MeanAcc ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (MeanAcc -> Int64 -> MeanAcc) ->
+    MeanAcc ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+-- foldLinearGroups: count accumulator
+{-# SPECIALIZE foldLinearGroups ::
+    (Int -> Double -> Int) ->
+    Int ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Int -> Float -> Int) ->
+    Int ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Int -> Int -> Int) ->
+    Int ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Int -> Int8 -> Int) ->
+    Int ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Int -> Int16 -> Int) ->
+    Int ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Int -> Int32 -> Int) ->
+    Int ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Int -> Int64 -> Int) ->
+    Int ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+-- foldLinearGroups: sum/min/max (acc == elem)
+{-# SPECIALIZE foldLinearGroups ::
+    (Double -> Double -> Double) ->
+    Double ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Float -> Float -> Float) ->
+    Float ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Int8 -> Int8 -> Int8) ->
+    Int8 ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Int16 -> Int16 -> Int16) ->
+    Int16 ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Int32 -> Int32 -> Int32) ->
+    Int32 ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE foldLinearGroups ::
+    (Int64 -> Int64 -> Int64) ->
+    Int64 ->
+    Column ->
+    VU.Vector Int ->
+    Int ->
+    Either DataFrameException Column
+    #-}
+
+-- mapColumn: finalize
+{-# SPECIALIZE mapColumn ::
+    (MeanAcc -> Double) -> Column -> Either DataFrameException Column
+    #-}
+{-# SPECIALIZE mapColumn ::
+    (Double -> Double) -> Column -> Either DataFrameException Column
+    #-}
+{-# SPECIALIZE mapColumn ::
+    (Float -> Float) -> Column -> Either DataFrameException Column
+    #-}
+{-# SPECIALIZE mapColumn ::
+    (Int -> Int) -> Column -> Either DataFrameException Column
+    #-}
+
+-- zipWithColumns: binary ops
+{-# SPECIALIZE zipWithColumns ::
+    (Double -> Double -> Double) ->
+    Column ->
+    Column ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE zipWithColumns ::
+    (Float -> Float -> Float) ->
+    Column ->
+    Column ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE zipWithColumns ::
+    (Int -> Int -> Int) -> Column -> Column -> Either DataFrameException Column
+    #-}
+{-# SPECIALIZE zipWithColumns ::
+    (Int8 -> Int8 -> Int8) -> Column -> Column -> Either DataFrameException Column
+    #-}
+{-# SPECIALIZE zipWithColumns ::
+    (Int16 -> Int16 -> Int16) ->
+    Column ->
+    Column ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE zipWithColumns ::
+    (Int32 -> Int32 -> Int32) ->
+    Column ->
+    Column ->
+    Either DataFrameException Column
+    #-}
+{-# SPECIALIZE zipWithColumns ::
+    (Int64 -> Int64 -> Int64) ->
+    Column ->
+    Column ->
+    Either DataFrameException Column
+    #-}
+
 -------------------------------------------------------------------------------
 -- Value: the unified result type
 -------------------------------------------------------------------------------

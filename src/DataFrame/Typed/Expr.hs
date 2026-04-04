@@ -128,12 +128,11 @@ import Data.String (IsString (..))
 import qualified Data.Text as T
 import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 
+import qualified DataFrame.Functions as F
 import DataFrame.Internal.Column (Columnable)
 import DataFrame.Internal.Expression (
-    AggStrategy (..),
     BinaryOp (..),
     Expr (..),
-    MeanAcc (..),
     NamedExpr,
     UExpr (..),
     UnaryOp (..),
@@ -522,33 +521,22 @@ not (TExpr e) = TExpr (Unary (MkUnaryOp Prelude.not "not" (Just "!")) e)
 -------------------------------------------------------------------------------
 
 sum :: (Columnable a, Num a) => TExpr cols a -> TExpr cols a
-sum (TExpr e) = TExpr (Agg (FoldAgg "sum" Nothing (+)) e)
+sum (TExpr e) = TExpr (F.sum e)
 
 mean :: (Columnable a, Real a) => TExpr cols a -> TExpr cols Double
-mean (TExpr e) =
-    TExpr
-        ( Agg
-            ( MergeAgg
-                "mean"
-                (MeanAcc 0.0 0)
-                (\(MeanAcc s c) x -> MeanAcc (s + realToFrac x) (c + 1))
-                (\(MeanAcc s1 c1) (MeanAcc s2 c2) -> MeanAcc (s1 + s2) (c1 + c2))
-                (\(MeanAcc s c) -> if c == 0 then 0 / 0 else s / fromIntegral c)
-            )
-            e
-        )
+mean (TExpr e) = TExpr (F.mean e)
 
 count :: (Columnable a) => TExpr cols a -> TExpr cols Int
-count (TExpr e) = TExpr (Agg (MergeAgg "count" (0 :: Int) (\c _ -> c + 1) (+) id) e)
+count (TExpr e) = TExpr (F.count e)
 
 minimum :: (Columnable a, Ord a) => TExpr cols a -> TExpr cols a
-minimum (TExpr e) = TExpr (Agg (FoldAgg "minimum" Nothing min) e)
+minimum (TExpr e) = TExpr (F.minimum e)
 
 maximum :: (Columnable a, Ord a) => TExpr cols a -> TExpr cols a
-maximum (TExpr e) = TExpr (Agg (FoldAgg "maximum" Nothing max) e)
+maximum (TExpr e) = TExpr (F.maximum e)
 
 collect :: (Columnable a) => TExpr cols a -> TExpr cols [a]
-collect (TExpr e) = TExpr (Agg (FoldAgg "collect" (Just []) (flip (:))) e)
+collect (TExpr e) = TExpr (F.collect e)
 
 -------------------------------------------------------------------------------
 -- Cast / coercion expressions

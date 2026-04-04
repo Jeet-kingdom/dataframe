@@ -283,6 +283,9 @@ compareExpr e1 e2 = compare (exprKey e1) (exprKey e2)
     exprKey (Agg (FoldAgg name _ _) e) = "5:" ++ T.unpack name ++ exprKey e
     exprKey (Agg (MergeAgg name _ _ _ _) e) = "5:" ++ T.unpack name ++ exprKey e
 
+instance (Ord a, Columnable a) => Ord (Expr a) where
+    compare l r = compareExpr (normalize l) (normalize r)
+
 instance (Eq a, Columnable a) => Eq (Expr a) where
     (==) l r = eqNormalized (normalize l) (normalize r)
       where

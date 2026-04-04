@@ -34,8 +34,8 @@ import qualified Data.Text as T
 import Data.Type.Equality
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
-import Data.Word (Word, Word16, Word32, Word64, Word8)
-import Type.Reflection (SomeTypeRep (..), eqTypeRep, typeRep)
+import Data.Word (Word16, Word32, Word64, Word8)
+import Type.Reflection (SomeTypeRep (..), typeRep)
 
 import DataFrame.Operators
 
