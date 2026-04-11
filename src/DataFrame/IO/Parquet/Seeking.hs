@@ -128,8 +128,8 @@ seekAndStreamBytes mSeek len f = do
 
 fSeek :: FileBufferedOrSeekable -> SeekMode -> Integer -> IO ()
 fSeek (FileSeekable (SeekableHandle h)) seekMode seekTo = hSeek h seekMode seekTo
-fSeek (FileBuffered i bs) AbsoluteSeek seekTo = writeIORef i (fromIntegral seekTo)
-fSeek (FileBuffered i bs) RelativeSeek seekTo = modifyIORef' i (+ fromIntegral seekTo)
+fSeek (FileBuffered i _bs) AbsoluteSeek seekTo = writeIORef i (fromIntegral seekTo)
+fSeek (FileBuffered i _bs) RelativeSeek seekTo = modifyIORef' i (+ fromIntegral seekTo)
 fSeek (FileBuffered i bs) SeekFromEnd seekTo = writeIORef i (fromIntegral $ BS.length bs + fromIntegral seekTo)
 
 fRead :: (MonadIO m) => FileBufferedOrSeekable -> Stream m Word8

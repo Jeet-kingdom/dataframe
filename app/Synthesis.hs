@@ -118,8 +118,8 @@ clean tdf =
 
 -- | Extract title (e.g. "Mr", "Mrs") from a full Titanic passenger name.
 extractTitle :: T.Text -> T.Text
-extractTitle name =
-    case filter (T.isSuffixOf ".") (T.words name) of
+extractTitle fullName =
+    case filter (T.isSuffixOf ".") (T.words fullName) of
         (w : _) -> T.dropEnd 1 w
         [] -> ""
 
@@ -133,10 +133,10 @@ computeAccuracy df =
                 DT.unsafeFreeze @RawPredSchema $
                     df |> D.select ["Survived", "prediction"]
         survived = DT.col @"Survived"
-        pred = DT.col @"prediction"
+        predCol = DT.col @"prediction"
         count expr = fromIntegral (DT.nRows (DT.filterWhere expr tdf))
-        tp = count ((survived DT..==. DT.lit 1) DT..&&. (pred DT..==. DT.lit 1))
-        tn = count ((survived DT..==. DT.lit 0) DT..&&. (pred DT..==. DT.lit 0))
-        fp = count ((survived DT..==. DT.lit 0) DT..&&. (pred DT..==. DT.lit 1))
-        fn = count ((survived DT..==. DT.lit 1) DT..&&. (pred DT..==. DT.lit 0))
+        tp = count ((survived DT..==. DT.lit 1) DT..&&. (predCol DT..==. DT.lit 1))
+        tn = count ((survived DT..==. DT.lit 0) DT..&&. (predCol DT..==. DT.lit 0))
+        fp = count ((survived DT..==. DT.lit 0) DT..&&. (predCol DT..==. DT.lit 1))
+        fn = count ((survived DT..==. DT.lit 1) DT..&&. (predCol DT..==. DT.lit 0))
      in (tp + tn) / (tp + tn + fp + fn)

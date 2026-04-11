@@ -127,15 +127,15 @@ values are wrapped in 'Just'.  Existing 'Nothing' in optional source columns
 stays as 'Nothing'.
 -}
 cast :: forall a. (Columnable a, Read a) => T.Text -> Expr (Maybe a)
-cast name = CastWith name "cast" (either (const Nothing) Just)
+cast colName = CastWith colName "cast" (either (const Nothing) Just)
 
 {- | Lenient coercion that substitutes a default for unconvertible values.
 Looks up column @name@, coerces its values to @a@, and uses @def@ wherever
 conversion fails or the source value is 'Nothing'.
 -}
 castWithDefault :: forall a. (Columnable a, Read a) => a -> T.Text -> Expr a
-castWithDefault def name =
-    CastWith name ("castWithDefault:" <> T.pack (show def)) (fromRight def)
+castWithDefault def colName =
+    CastWith colName ("castWithDefault:" <> T.pack (show def)) (fromRight def)
 
 {- | Lenient coercion returning @Either T.Text a@.  Successfully converted
 values are 'Right'; values that cannot be parsed are kept as 'Left' with
@@ -145,7 +145,7 @@ them downstream.  Existing 'Nothing' in optional source columns becomes
 -}
 castEither ::
     forall a. (Columnable a, Read a) => T.Text -> Expr (Either T.Text a)
-castEither name = CastWith name "castEither" (either (Left . T.pack) Right)
+castEither colName = CastWith colName "castEither" (either (Left . T.pack) Right)
 
 {- | Lenient coercion for assertedly non-nullable columns.
 Substitutes @error@ for @Nothing@, so it will crash at evaluation time if
@@ -153,9 +153,9 @@ any @Nothing@ is actually encountered.  For non-nullable and
 fully-populated nullable columns no cost is paid.
 -}
 unsafeCast :: forall a. (Columnable a, Read a) => T.Text -> Expr a
-unsafeCast name =
+unsafeCast colName =
     CastWith
-        name
+        colName
         "unsafeCast"
         (fromRight (error "unsafeCast: unexpected Nothing in column"))
 
@@ -257,7 +257,7 @@ mode =
             ( fst
                 . L.maximumBy (compare `on` snd)
                 . M.toList
-                . V.foldl' (\m e -> M.insertWith (+) e 1 m) M.empty
+                . V.foldl' (\m e -> M.insertWith (+) e (1 :: Int) m) M.empty
             )
         )
 {-# SPECIALIZE mode :: Expr Double -> Expr Double #-}
@@ -520,8 +520,8 @@ recodeWithCondition ::
     forall a b.
     (Columnable a, Columnable b) =>
     Expr b -> [(Expr a -> Expr Bool, b)] -> Expr a -> Expr b
-recodeWithCondition fallback [] value = fallback
-recodeWithCondition fallback ((cond, value) : rest) expr = ifThenElse (cond expr) (lit value) (recodeWithCondition fallback rest expr)
+recodeWithCondition fallback [] _val = fallback
+recodeWithCondition fallback ((cond, val) : rest) expr = ifThenElse (cond expr) (lit val) (recodeWithCondition fallback rest expr)
 
 recodeWithDefault ::
     forall a b.
@@ -661,7 +661,7 @@ typeFromString [t0] = do
             | otherwise -> do
                 m <- lookupTypeName t
                 case m of
-                    Just name -> pure (ConT name)
+                    Just tyName -> pure (ConT tyName)
                     Nothing -> fail $ "Unsupported type: " ++ t0
 typeFromString [tycon, t1] = AppT <$> typeFromString [tycon] <*> typeFromString [t1]
 typeFromString [tycon, t1, t2] =
@@ -721,14 +721,14 @@ schemaToEmptyDataFrame nullableCols elems =
      in fromNamedColumns (map (schemaElemToColumn nullableCols) leafElems)
 
 schemaElemToColumn :: S.Set T.Text -> SchemaElement -> (T.Text, Column)
-schemaElemToColumn nullableCols elem =
-    let name = elementName elem
-        isNull = name `S.member` nullableCols
-        col =
+schemaElemToColumn nullableCols element =
+    let colName = elementName element
+        isNull = colName `S.member` nullableCols
+        column =
             if isNull
-                then emptyNullableColumnForType (elementType elem)
-                else emptyColumnForType (elementType elem)
-     in (name, col)
+                then emptyNullableColumnForType (elementType element)
+                else emptyColumnForType (elementType element)
+     in (colName, column)
 
 emptyColumnForType :: TType -> Column
 emptyColumnForType = \case
@@ -774,7 +774,7 @@ declareColumnsWithPrefix' prefix df =
         types = map (columnTypeString . (`unsafeGetColumn` df)) names
         specs =
             zipWith
-                ( \name type_ -> (name, maybe "" (sanitize . (<> "_")) prefix <> sanitize name, type_)
+                ( \colName type_ -> (colName, maybe "" (sanitize . (<> "_")) prefix <> sanitize colName, type_)
                 )
                 names
                 types

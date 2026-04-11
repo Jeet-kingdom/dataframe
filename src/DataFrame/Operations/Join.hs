@@ -81,8 +81,8 @@ buildCompactIndex :: VU.Vector Int -> CompactIndex
 buildCompactIndex hashes =
     let n = VU.length hashes
         (sortedHashes, sortedIndices) = sortWithIndices hashes
-        !offsets = buildOffsets sortedHashes n 0 HM.empty
-     in CompactIndex sortedIndices offsets
+        !offs = buildOffsets sortedHashes n 0 HM.empty
+     in CompactIndex sortedIndices offs
   where
     buildOffsets ::
         VU.Vector Int ->

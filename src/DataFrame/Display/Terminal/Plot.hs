@@ -171,7 +171,7 @@ plotCorrelationMatrix df = do
                         numericCols
                 )
                 numericCols
-    print (zip [0 ..] numericCols)
+    print (zip [(0 :: Int) ..] numericCols)
     T.putStrLn $ heatmap correlations (defPlot{plotTitle = "Correlation Matrix"})
   where
     correlation xs ys =
@@ -179,8 +179,8 @@ plotCorrelationMatrix df = do
             meanX = sum xs / n
             meanY = sum ys / n
             covXY = sum [(x - meanX) * (y - meanY) | (x, y) <- zip xs ys] / n
-            stdX = sqrt $ sum [(x - meanX) ^ 2 | x <- xs] / n
-            stdY = sqrt $ sum [(y - meanY) ^ 2 | y <- ys] / n
+            stdX = sqrt $ sum [(x - meanX) ^ (2 :: Int) | x <- xs] / n
+            stdY = sqrt $ sum [(y - meanY) ^ (2 :: Int) | y <- ys] / n
          in covXY / (stdX * stdY)
 
 plotBars :: (HasCallStack) => T.Text -> DataFrame -> IO ()
@@ -254,7 +254,7 @@ plotGroupedBarsWithN n groupCol valCol config df = do
                     M.toList $
                         M.fromListWith
                             (+)
-                            [(g <> " - " <> v, 1) | (g, v) <- pairs]
+                            [(g <> " - " <> v, 1 :: Int) | (g, v) <- pairs]
                 finalCounts = groupWithOther n [(k, fromIntegral v) | (k, v) <- counts]
             T.putStrLn $ bars finalCounts (plotSettings config)
 
@@ -388,7 +388,7 @@ getCategoricalCounts colName df =
     countByShow xs =
         map (Data.Bifunctor.bimap T.pack fromIntegral) $
             M.toList $
-                L.foldl' (\acc x -> M.insertWith (+) (show x) 1 acc) M.empty xs
+                L.foldl' (\acc x -> M.insertWith (+) (show x) (1 :: Int) acc) M.empty xs
 
 isNumericColumnCheck :: T.Text -> DataFrame -> Bool
 isNumericColumnCheck colName df = isNumericColumn df colName
@@ -579,7 +579,7 @@ plotPieGroupedWith groupCol valCol config df = do
             let groups = extractStringColumn groupCol df
                 vals = extractStringColumn valCol df
                 combined = zipWith (\g v -> g <> " - " <> v) groups vals
-                counts = M.toList $ M.fromListWith (+) [(c, 1) | c <- combined]
+                counts = M.toList $ M.fromListWith (+) [(c, 1 :: Int) | c <- combined]
                 finalCounts = groupWithOtherForPie 10 [(k, fromIntegral v) | (k, v) <- counts]
             T.putStrLn $ pie finalCounts (plotSettings config)
 

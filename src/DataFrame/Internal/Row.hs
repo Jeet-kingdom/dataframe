@@ -61,7 +61,7 @@ type Row = V.Vector Any
 (!?) :: [a] -> Int -> Maybe a
 (!?) [] _ = Nothing
 (!?) (x : _) 0 = Just x
-(!?) (x : xs) n = (!?) xs (n - 1)
+(!?) (_x : xs) n = (!?) xs (n - 1)
 
 mkColumnFromRow :: Int -> [[Any]] -> Column
 mkColumnFromRow i rows = case rows of

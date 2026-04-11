@@ -199,7 +199,7 @@ _readParquetWithOpts extraConfig opts path = withFileBufferedOrSeekable extraCon
     let schemaElements = schema fileMetadata
     let sNodes = parseAll (drop 1 schemaElements)
     let getTypeLength :: [String] -> Maybe Int32
-        getTypeLength path = findTypeLength schemaElements path 0
+        getTypeLength colPath = findTypeLength schemaElements colPath (0 :: Int)
           where
             findTypeLength [] _ _ = Nothing
             findTypeLength (s : ss) targetPath depth
@@ -213,7 +213,7 @@ _readParquetWithOpts extraConfig opts path = withFileBufferedOrSeekable extraCon
             pathToElement _ _ _ = []
 
     forM_ (rowGroups fileMetadata) $ \rowGroup -> do
-        forM_ (zip (rowGroupColumns rowGroup) [0 ..]) $ \(colChunk, colIdx) -> do
+        forM_ (zip (rowGroupColumns rowGroup) [(0 :: Int) ..]) $ \(colChunk, colIdx) -> do
             let metadata = columnMetaData colChunk
             let colPath = columnPathInSchema metadata
             let cleanPath = cleanColPath sNodes colPath
@@ -434,7 +434,7 @@ processColumnPages ::
     Maybe Int32 ->
     LogicalType ->
     IO DI.Column
-processColumnPages (maxDef, maxRep) pages pType _ maybeTypeLength lType = do
+processColumnPages (maxDef, maxRep) pages pType _ maybeTypeLength _lType = do
     let dictPages = filter isDictionaryPage pages
     let dataPages = filter isDataPage pages
 

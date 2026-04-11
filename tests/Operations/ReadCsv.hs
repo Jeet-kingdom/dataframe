@@ -6,7 +6,6 @@
 module Operations.ReadCsv where
 
 import qualified Data.Text as T
-import qualified Data.Vector.Unboxed as VU
 import qualified DataFrame as D
 
 import DataFrame.Internal.Column (Column (..), columnTypeString)
@@ -16,7 +15,6 @@ import DataFrame.Internal.DataFrame (
     getColumn,
  )
 import Test.HUnit
-import Type.Reflection (typeRep)
 
 arbuthnotPath :: FilePath
 arbuthnotPath = "./tests/data/arbuthnot.csv"

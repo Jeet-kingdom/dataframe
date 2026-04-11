@@ -10,7 +10,6 @@ import qualified DataFrame as D
 import DataFrame.IO.CSV (fromCsv, fromCsvBytes)
 import qualified DataFrame.Internal.Column as DI
 import DataFrame.Internal.DataFrame (DataFrame (..), toCsv)
-import qualified DataFrame.Operations.Core as D
 import Test.HUnit (
     Test (TestCase, TestLabel),
     assertEqual,

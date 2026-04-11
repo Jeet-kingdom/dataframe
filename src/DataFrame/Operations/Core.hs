@@ -531,7 +531,7 @@ describeColumns df =
             [ColumnInfo]
     indexMap = M.fromList (map (\(a, b) -> (b, a)) $ M.toList (columnIndices df))
     columnName i = M.lookup i indexMap
-    go acc i col@(BoxedColumn bm (c :: V.Vector a)) =
+    go acc i col@(BoxedColumn _bm (_c :: V.Vector a)) =
         let
             cname = columnName i
             countNulls = nulls col
@@ -546,7 +546,7 @@ describeColumns df =
                         countNulls
                         columnType
                         : acc
-    go acc i col@(UnboxedColumn bm c) =
+    go acc i col@(UnboxedColumn _bm _c) =
         let
             cname = columnName i
             countNulls = nulls col
@@ -631,7 +631,7 @@ or drop the ones you don't want.
 @
 -}
 fromUnnamedColumns :: [Column] -> DataFrame
-fromUnnamedColumns = fromNamedColumns . zip (map (T.pack . show) [0 ..])
+fromUnnamedColumns = fromNamedColumns . zip (map (T.pack . show) [(0 :: Int) ..])
 
 {- | Create a dataframe from a list of column names and rows.
 

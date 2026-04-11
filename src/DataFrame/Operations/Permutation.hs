@@ -127,8 +127,8 @@ shuffledIndices pureGen k
         go vm n nGen
         VU.unsafeFreeze vm
 
-    go v (-1) _ = pure ()
-    go v 0 _ = pure ()
+    go _v (-1) _ = pure ()
+    go _v 0 _ = pure ()
     go v maxInd gen =
         let
             (n, nextGen) = randomR (1, maxInd) gen

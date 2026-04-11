@@ -33,7 +33,7 @@ deriveWAI =
             ( Just $
                 DI.BoxedColumn
                     Nothing
-                    (V.fromList (zipWith (\n c -> show n ++ [c]) [1 .. 26] ['a' .. 'z']))
+                    (V.fromList (zipWith (\n c -> show n ++ [c]) ([1 .. 26] :: [Int]) ['a' .. 'z']))
             )
             ( DI.getColumn "test4" $
                 D.derive
@@ -52,7 +52,7 @@ deriveWAITyped =
     TestCase
         ( assertEqual
             "typed derive works with column expression"
-            (zipWith (\n c -> show n ++ [c]) [1 .. 26] ['a' .. 'z'])
+            (zipWith (\n c -> show n ++ [c]) ([1 .. 26] :: [Int]) ['a' .. 'z'])
             ( DT.columnAsList @"test4" $
                 DT.derive
                     @"test4"

@@ -447,7 +447,7 @@ plotSingleBars colName config df = do
             let values = extractNumericColumn colName df
                 labels' =
                     if length values > 20
-                        then take 20 ["Item " <> T.pack (show i) | i <- [1 ..]]
+                        then take 20 ["Item " <> T.pack (show i) | i <- [(1 :: Int) ..]]
                         else ["Item " <> T.pack (show i) | i <- [1 .. length values]]
                 vals = if length values > 20 then take 20 values else values
                 labels = T.intercalate "," ["\"" <> label <> "\"" | label <- labels']
@@ -794,7 +794,7 @@ plotGroupedBarsWithN n groupCol valCol config df = do
                     M.toList $
                         M.fromListWith
                             (+)
-                            [(g <> " - " <> v, 1) | (g, v) <- pairs]
+                            [(g <> " - " <> v, 1 :: Int) | (g, v) <- pairs]
                 finalCounts = groupWithOther n [(k, fromIntegral v) | (k, v) <- counts]
                 labels = T.intercalate "," ["\"" <> label <> "\"" | (label, _) <- finalCounts]
                 dataPoints = T.intercalate "," [T.pack (show val) | (_, val) <- finalCounts]
@@ -946,7 +946,7 @@ getCategoricalCounts colName df =
     countByShow xs =
         map (Data.Bifunctor.bimap T.pack fromIntegral) $
             M.toList $
-                L.foldl' (\acc x -> M.insertWith (+) (show x) 1 acc) M.empty xs
+                L.foldl' (\acc x -> M.insertWith (+) (show x) (1 :: Int) acc) M.empty xs
 
 groupWithOther :: Int -> [(T.Text, Double)] -> [(T.Text, Double)]
 groupWithOther n items =

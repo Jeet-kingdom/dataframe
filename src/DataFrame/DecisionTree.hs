@@ -395,8 +395,8 @@ identifyCarePoints ::
 identifyCarePoints target df indices leftTree rightTree =
     case interpret @a df (Col target) of
         Left _ -> []
-        Right (TColumn col) ->
-            case toVector @a col of
+        Right (TColumn column) ->
+            case toVector @a column of
                 Left _ -> []
                 Right targetVals ->
                     V.toList $ V.mapMaybe (checkPoint targetVals) indices
@@ -424,12 +424,12 @@ predictWithTree ::
     Int -> -- Row index
     Tree a ->
     a
-predictWithTree target df idx (Leaf v) = v
+predictWithTree _target _df _idx (Leaf v) = v
 predictWithTree target df idx (Branch cond left right) =
     case interpret @Bool df cond of
         Left _ -> predictWithTree @a target df idx left -- Default to left on error
-        Right (TColumn col) ->
-            case toVector @Bool col of
+        Right (TColumn column) ->
+            case toVector @Bool column of
                 Left _ -> predictWithTree @a target df idx left
                 Right boolVals ->
                     if boolVals V.! idx
@@ -440,8 +440,8 @@ countCarePointErrors :: Expr Bool -> DataFrame -> [CarePoint] -> Int
 countCarePointErrors cond df carePoints =
     case interpret @Bool df cond of
         Left _ -> length carePoints
-        Right (TColumn col) ->
-            case toVector @Bool col of
+        Right (TColumn column) ->
+            case toVector @Bool column of
                 Left _ -> length carePoints
                 Right boolVals ->
                     length $ filter (isMisclassified boolVals) carePoints
@@ -457,8 +457,8 @@ partitionIndices ::
 partitionIndices cond df indices =
     case interpret @Bool df cond of
         Left _ -> (indices, V.empty)
-        Right (TColumn col) ->
-            case toVector @Bool col of
+        Right (TColumn column) ->
+            case toVector @Bool column of
                 Left _ -> (indices, V.empty)
                 Right boolVals ->
                     V.partition (boolVals V.!) indices
@@ -473,13 +473,13 @@ majorityValueFromIndices ::
 majorityValueFromIndices target df indices =
     case interpret @a df (Col target) of
         Left e -> throw e
-        Right (TColumn col) ->
-            case toVector @a col of
+        Right (TColumn column) ->
+            case toVector @a column of
                 Left e -> throw e
                 Right vals ->
                     let counts =
                             V.foldl'
-                                (\acc i -> M.insertWith (+) (vals V.! i) 1 acc)
+                                (\acc i -> M.insertWith (+) (vals V.! i) (1 :: Int) acc)
                                 M.empty
                                 indices
                      in if M.null counts
@@ -499,8 +499,8 @@ computeTreeLoss target df indices tree
     | otherwise =
         case interpret @a df (Col target) of
             Left _ -> 1.0
-            Right (TColumn col) ->
-                case toVector @a col of
+            Right (TColumn column) ->
+                case toVector @a column of
                     Left _ -> 1.0
                     Right targetVals ->
                         let
@@ -699,24 +699,26 @@ numericExprsWithTerms cfg df =
 numericCols :: DataFrame -> [NumExpr]
 numericCols df = concatMap extract (columnNames df)
   where
-    extract col = case unsafeGetColumn col df of
+    extract colName = case unsafeGetColumn colName df of
         UnboxedColumn Nothing (_ :: VU.Vector b) ->
             case testEquality (typeRep @b) (typeRep @Double) of
-                Just Refl -> [NDouble (Col col)]
+                Just Refl -> [NDouble (Col colName)]
                 Nothing -> case sIntegral @b of
-                    STrue -> [NDouble (F.toDouble (Col @b col))]
+                    STrue -> [NDouble (F.toDouble (Col @b colName))]
                     SFalse -> []
         BoxedColumn (Just _) (_ :: V.Vector b) ->
             case testEquality (typeRep @b) (typeRep @Double) of
-                Just Refl -> [NMaybeDouble (Col @(Maybe b) col)]
+                Just Refl -> [NMaybeDouble (Col @(Maybe b) colName)]
                 Nothing -> case sIntegral @b of
-                    STrue -> [NMaybeDouble (F.whenPresent (realToFrac @b @Double) (Col @(Maybe b) col))]
+                    STrue ->
+                        [NMaybeDouble (F.whenPresent (realToFrac @b @Double) (Col @(Maybe b) colName))]
                     SFalse -> []
         UnboxedColumn (Just _) (_ :: VU.Vector b) ->
             case testEquality (typeRep @b) (typeRep @Double) of
-                Just Refl -> [NMaybeDouble (Col @(Maybe b) col)]
+                Just Refl -> [NMaybeDouble (Col @(Maybe b) colName)]
                 Nothing -> case sIntegral @b of
-                    STrue -> [NMaybeDouble (F.whenPresent (realToFrac @b @Double) (Col @(Maybe b) col))]
+                    STrue ->
+                        [NMaybeDouble (F.whenPresent (realToFrac @b @Double) (Col @(Maybe b) colName))]
                     SFalse -> []
         _ -> []
 
@@ -766,16 +768,18 @@ generateConditionsOld cfg df =
         ords = columnOrdering cfg
         genConds :: T.Text -> [Expr Bool]
         genConds colName = case unsafeGetColumn colName df of
-            (BoxedColumn Nothing (col :: V.Vector a)) ->
-                case withOrdFrom @a ords (map (Lit . (`percentileOrd'` col)) [1, 25, 75, 99]) of
+            (BoxedColumn Nothing (column :: V.Vector a)) ->
+                case withOrdFrom @a ords (map (Lit . (`percentileOrd'` column)) [1, 25, 75, 99]) of
                     Just ps -> map (F.lift2 (==) (Col @a colName)) ps
                     Nothing -> []
-            (BoxedColumn (Just _) (col :: V.Vector a)) -> case sFloating @a of
+            (BoxedColumn (Just _) (column :: V.Vector a)) -> case sFloating @a of
                 STrue -> [] -- handled by numericCols / numericExprs
                 SFalse -> case sIntegral @a of
                     STrue -> [] -- handled by numericCols / numericExprs
                     SFalse ->
-                        case withOrdFrom @a ords (map (Lit . Just . (`percentileOrd'` col)) [1, 25, 75, 99]) of
+                        case withOrdFrom @a
+                            ords
+                            (map (Lit . Just . (`percentileOrd'` column)) [1, 25, 75, 99]) of
                             Just ps -> map (F.lift2 (==) (Col @(Maybe a) colName)) ps
                             Nothing -> []
             (UnboxedColumn _ (_ :: VU.Vector a)) -> []
@@ -794,7 +798,7 @@ generateConditionsOld cfg df =
                 ]
           where
             colConds (!l, !r) = case (unsafeGetColumn l df, unsafeGetColumn r df) of
-                ( BoxedColumn Nothing (col1 :: V.Vector a)
+                ( BoxedColumn Nothing (_col1 :: V.Vector a)
                     , BoxedColumn Nothing (_ :: V.Vector b)
                     ) ->
                         case testEquality (typeRep @a) (typeRep @b) of
@@ -826,7 +830,7 @@ calculateGini target df =
         counts = getCounts @a target df
         numClasses = fromIntegral $ M.size counts
         probs = map (\c -> (fromIntegral c + 1) / (n + numClasses)) (M.elems counts)
-     in if n == 0 then 0 else 1 - sum (map (^ 2) probs)
+     in if n == 0 then 0 else 1 - sum (map (^ (2 :: Int)) probs)
 
 majorityValue :: forall a. (Columnable a, Ord a) => T.Text -> DataFrame -> a
 majorityValue target df =
@@ -840,8 +844,8 @@ getCounts ::
 getCounts target df =
     case interpret @a df (Col target) of
         Left e -> throw e
-        Right (TColumn col) ->
-            case toVector @a col of
+        Right (TColumn column) ->
+            case toVector @a column of
                 Left e -> throw e
                 Right vals -> foldl' (\acc x -> M.insertWith (+) x 1 acc) M.empty (V.toList vals)
 
@@ -849,8 +853,8 @@ percentile :: Int -> Expr Double -> DataFrame -> Double
 percentile p expr df =
     case interpret @Double df expr of
         Left _ -> 0
-        Right (TColumn col) ->
-            case toVector @Double col of
+        Right (TColumn column) ->
+            case toVector @Double column of
                 Left _ -> 0
                 Right vals ->
                     let sorted = V.fromList $ sort $ V.toList vals
@@ -898,13 +902,13 @@ probsFromIndices ::
 probsFromIndices target df indices =
     case interpret @a df (Col target) of
         Left _ -> M.empty
-        Right (TColumn col) ->
-            case toVector @a col of
+        Right (TColumn column) ->
+            case toVector @a column of
                 Left _ -> M.empty
                 Right vals ->
                     let counts =
                             V.foldl'
-                                (\acc i -> M.insertWith (+) (vals V.! i) 1 acc)
+                                (\acc i -> M.insertWith (+) (vals V.! i) (1 :: Int) acc)
                                 M.empty
                                 indices
                         total = fromIntegral (V.length indices) :: Double

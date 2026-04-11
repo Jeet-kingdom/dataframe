@@ -94,15 +94,15 @@ generatePrograms includeConds conds vars constants ps =
                , i <- [2 .. 6]
                ]
             ++ [ p + q
-               | (i, p) <- zip [0 ..] existingPrograms
-               , (j, q) <- zip [0 ..] existingPrograms
+               | (i, p) <- zip [(0 :: Int) ..] existingPrograms
+               , (j, q) <- zip [(0 :: Int) ..] existingPrograms
                , Prelude.not (isLiteral p && isLiteral q)
                , Prelude.not (isConditional p || isConditional q)
                , i >= j
                ]
             ++ [ p - q
-               | (i, p) <- zip [0 ..] existingPrograms
-               , (j, q) <- zip [0 ..] existingPrograms
+               | (i, p) <- zip [(0 :: Int) ..] existingPrograms
+               , (j, q) <- zip [(0 :: Int) ..] existingPrograms
                , Prelude.not (isLiteral p && isLiteral q)
                , Prelude.not (isConditional p || isConditional q)
                , i /= j
@@ -110,16 +110,16 @@ generatePrograms includeConds conds vars constants ps =
             ++ ( if includeConds
                     then
                         [ F.min p q
-                        | (i, p) <- zip [0 ..] existingPrograms
-                        , (j, q) <- zip [0 ..] existingPrograms
+                        | (i, p) <- zip [(0 :: Int) ..] existingPrograms
+                        , (j, q) <- zip [(0 :: Int) ..] existingPrograms
                         , Prelude.not (isLiteral p && isLiteral q)
                         , Prelude.not (isConditional p || isConditional q)
                         , p /= q
                         , i > j
                         ]
                             ++ [ F.max p q
-                               | (i, p) <- zip [0 ..] existingPrograms
-                               , (j, q) <- zip [0 ..] existingPrograms
+                               | (i, p) <- zip [(0 :: Int) ..] existingPrograms
+                               , (j, q) <- zip [(0 :: Int) ..] existingPrograms
                                , Prelude.not (isLiteral p && isLiteral q)
                                , Prelude.not (isConditional p || isConditional q)
                                , p /= q
@@ -135,8 +135,8 @@ generatePrograms includeConds conds vars constants ps =
                     else []
                )
             ++ [ p * q
-               | (i, p) <- zip [0 ..] existingPrograms
-               , (j, q) <- zip [0 ..] existingPrograms
+               | (i, p) <- zip [(0 :: Int) ..] existingPrograms
+               , (j, q) <- zip [(0 :: Int) ..] existingPrograms
                , Prelude.not (isLiteral p && isLiteral q)
                , Prelude.not (isConditional p || isConditional q)
                , i >= j
@@ -175,8 +175,8 @@ deduplicate df = go [] . L.nub . L.sortBy (\e1 e2 -> compare (eSize e1) (eSize e
             Left e -> throw e
             Right v -> v
         hasInvalid = case res of
-            (TColumn (UnboxedColumn _ (col :: VU.Vector b))) -> case testEquality (typeRep @Double) (typeRep @b) of
-                Just Refl -> VU.any (\n -> isNaN n || isInfinite n) col
+            (TColumn (UnboxedColumn _ (column :: VU.Vector b))) -> case testEquality (typeRep @Double) (typeRep @b) of
+                Just Refl -> VU.any (\n -> isNaN n || isInfinite n) column
                 Nothing -> False
             _ -> False
 
@@ -280,7 +280,7 @@ roundToSigDigits n x
     | otherwise =
         let magnitude = floor (logBase 10 (abs x))
             scale = 10 ** fromIntegral (n - 1 - magnitude)
-         in fromIntegral (round (x * scale)) / scale
+         in fromIntegral (round (x * scale) :: Int) / scale
 
 roundTo2SigDigits :: Double -> Double
 roundTo2SigDigits = roundToSigDigits 2
@@ -326,11 +326,11 @@ getLossFunction f = case f of
     MutualInformation ->
         ( \l r ->
             mutualInformationBinned
-                (Prelude.max 10 (ceiling (sqrt (fromIntegral (VU.length l)))))
+                (Prelude.max 10 (ceiling (sqrt (fromIntegral (VU.length l) :: Double))))
                 l
                 r
         )
-    PearsonCorrelation -> (\l r -> (^ 2) <$> correlation' l r)
+    PearsonCorrelation -> (\l r -> (^ (2 :: Int)) <$> correlation' l r)
     MeanSquaredError -> (\l r -> fmap negate (meanSquaredError l r))
     F1 -> f1FromBinary
 
@@ -382,9 +382,9 @@ pickTopN ::
     [(Expr Double, TypedColumn a)] ->
     [Expr Double]
 pickTopN _ _ _ [] = []
-pickTopN df (TColumn col) cfg ps =
+pickTopN df (TColumn column) cfg ps =
     let
-        l = case toVector @Double @VU.Vector col of
+        l = case toVector @Double @VU.Vector column of
             Left e -> throw e
             Right v -> v
         ordered =
@@ -412,14 +412,14 @@ pickTopN df (TColumn col) cfg ps =
                 case toVector @Double @VU.Vector col' of
                     Left e -> throw e
                     Right v -> VU.convert v
-        interpretDoubleVector e =
+        interpretDoubleVector e' =
             let
-                (TColumn col') = case interpret df e of
-                    Left e -> throw e
+                (TColumn col') = case interpret df e' of
+                    Left err -> throw err
                     Right v -> v
              in
                 case toVector @Double @VU.Vector col' of
-                    Left e -> throw e
+                    Left err -> throw err
                     Right v -> VU.convert v
      in
         trace
@@ -439,9 +439,9 @@ pickTopNBool ::
     [(Expr Bool, TypedColumn Bool)] ->
     [Expr Bool]
 pickTopNBool _ _ [] = []
-pickTopNBool df (TColumn col) ps =
+pickTopNBool _df (TColumn column) ps =
     let
-        l = case toVector @Double @VU.Vector col of
+        l = case toVector @Double @VU.Vector column of
             Left e -> throw e
             Right v -> v
         ordered =
@@ -473,10 +473,10 @@ pickTopNBool df (TColumn col) ps =
         ordered
 
 satisfiesExamples :: DataFrame -> TypedColumn Double -> Expr Double -> Bool
-satisfiesExamples df col expr =
+satisfiesExamples df column expr =
     let
         result = case interpret df expr of
             Left e -> throw e
             Right v -> v
      in
-        result == col
+        result == column

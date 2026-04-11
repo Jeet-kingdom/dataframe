@@ -7,6 +7,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module DataFrame.Operations.Statistics where
 
@@ -69,11 +70,11 @@ frequencies expr df =
         initDf =
             empty
                 & insertVector "Statistic" (V.fromList ["Count" :: T.Text, "Percentage (%)"])
-        freqs col =
+        freqs _col' =
             L.foldl'
-                ( \d (col, k) ->
+                ( \d (col'', k) ->
                     insertVector
-                        (showValue @a col)
+                        (showValue @a col'')
                         (V.fromList [toAny k, calculatePercentage counts k])
                         d
                 )
@@ -249,7 +250,7 @@ sum expr df = case interpret df expr of
     Left e -> throw e
     Right (TColumn xs) -> case toVector @a @V.Vector xs of
         Left e -> throw e
-        Right xs -> VG.sum xs
+        Right xs' -> VG.sum xs'
 
 {- | /O(n)/ Impute missing values in a column using a derived scalar.
 
@@ -368,7 +369,7 @@ summarize df =
             quantiles = applyStatistics (quantiles' (VU.fromList [0, 1, 2, 3, 4]) 4) name df
             min' = flip (VG.!) 0 <$> quantiles
             quartile1 = flip (VG.!) 1 <$> quantiles
-            median' = flip (VG.!) 2 <$> quantiles
+            medianVal = flip (VG.!) 2 <$> quantiles
             quartile3 = flip (VG.!) 3 <$> quantiles
             max' = flip (VG.!) 4 <$> quantiles
             iqr = (-) <$> quartile3 <*> quartile1
@@ -378,7 +379,7 @@ summarize df =
             , mean' <$> doubleColumn name
             , min'
             , quartile1
-            , median'
+            , medianVal
             , quartile3
             , max'
             , sqrt . variance' <$> doubleColumn name

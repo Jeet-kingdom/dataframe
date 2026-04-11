@@ -132,7 +132,7 @@ filter (Col filterColumnName) condition df = case getColumn filterColumnName df 
     Nothing ->
         throw $
             ColumnsNotFoundException [filterColumnName] "filter" (M.keys $ columnIndices df)
-    Just col@(BoxedColumn bm (column :: V.Vector b)) ->
+    Just _col@(BoxedColumn bm (column :: V.Vector b)) ->
         -- Check direct type match first, then try Maybe b match for nullable columns
         case testEquality (typeRep @a) (typeRep @b) of
             Just Refl -> filterByVector filterColumnName column condition df
@@ -145,7 +145,7 @@ filter (Col filterColumnName) condition df = case getColumn filterColumnName df 
                         Nothing -> filterByVector filterColumnName column condition df
                     Nothing -> filterByVector filterColumnName column condition df
                 _ -> filterByVector filterColumnName column condition df
-    Just col@(UnboxedColumn bm (column :: VU.Vector b)) ->
+    Just _col@(UnboxedColumn bm (column :: VU.Vector b)) ->
         case testEquality (typeRep @a) (typeRep @b) of
             Just Refl -> filterByVector filterColumnName column condition df
             Nothing -> case (bm, typeRep @a) of
@@ -160,10 +160,10 @@ filter (Col filterColumnName) condition df = case getColumn filterColumnName df 
                 _ -> filterByVector filterColumnName column condition df
 filter expr condition df =
     let
-        (TColumn col) = case interpret @a df (normalize expr) of
+        (TColumn col') = case interpret @a df (normalize expr) of
             Left e -> throw e
             Right c -> c
-        indexes = case findIndices condition col of
+        indexes = case findIndices condition col' of
             Right ixs -> ixs
             Left e -> throw e
         c' = snd $ dataframeDimensions df
@@ -211,10 +211,10 @@ filterBy = flip filter
 filterWhere :: Expr Bool -> DataFrame -> DataFrame
 filterWhere expr df =
     let
-        (TColumn col) = case interpret @Bool df (normalize expr) of
+        (TColumn col') = case interpret @Bool df (normalize expr) of
             Left e -> throw e
             Right c -> c
-        indexes = case findIndices id col of
+        indexes = case findIndices id col' of
             Right ixs -> ixs
             Left e -> throw e
         c' = snd $ dataframeDimensions df
@@ -229,12 +229,15 @@ filterWhere expr df =
 > filterJust "col" df
 -}
 filterJust :: T.Text -> DataFrame -> DataFrame
-filterJust name df = case getColumn name df of
+filterJust colName df = case getColumn colName df of
     Nothing ->
-        throw $ ColumnsNotFoundException [name] "filterJust" (M.keys $ columnIndices df)
+        throw $
+            ColumnsNotFoundException [colName] "filterJust" (M.keys $ columnIndices df)
     Just column | hasMissing column -> case column of
-        BoxedColumn (Just _) (col :: V.Vector a) -> filter (Col @(Maybe a) name) isJust df & apply @(Maybe a) fromJust name
-        UnboxedColumn (Just _) (col :: VU.Vector a) -> filter (Col @(Maybe a) name) isJust df & apply @(Maybe a) fromJust name
+        BoxedColumn (Just _) (_col :: V.Vector a) ->
+            filter (Col @(Maybe a) colName) isJust df & apply @(Maybe a) fromJust colName
+        UnboxedColumn (Just _) (_col :: VU.Vector a) ->
+            filter (Col @(Maybe a) colName) isJust df & apply @(Maybe a) fromJust colName
         _ -> df
     Just _ -> df
 
@@ -243,13 +246,13 @@ filterJust name df = case getColumn name df of
 > filterNothing "col" df
 -}
 filterNothing :: T.Text -> DataFrame -> DataFrame
-filterNothing name df = case getColumn name df of
+filterNothing colName df = case getColumn colName df of
     Nothing ->
         throw $
-            ColumnsNotFoundException [name] "filterNothing" (M.keys $ columnIndices df)
+            ColumnsNotFoundException [colName] "filterNothing" (M.keys $ columnIndices df)
     Just column | hasMissing column -> case column of
-        BoxedColumn (Just _) (col :: V.Vector a) -> filter (Col @(Maybe a) name) isNothing df
-        UnboxedColumn (Just _) (col :: VU.Vector a) -> filter (Col @(Maybe a) name) isNothing df
+        BoxedColumn (Just _) (_col :: V.Vector a) -> filter (Col @(Maybe a) colName) isNothing df
+        UnboxedColumn (Just _) (_col :: VU.Vector a) -> filter (Col @(Maybe a) colName) isNothing df
         _ -> df
     _ -> df
 
@@ -273,7 +276,7 @@ filterAllNothing df = foldr filterNothing df (columnNames df)
 > cube (10, 5) df
 -}
 cube :: (Int, Int) -> DataFrame -> DataFrame
-cube (length, width) = take length . selectBy [ColumnIndexRange (0, width - 1)]
+cube (len, width) = take len . selectBy [ColumnIndexRange (0, width - 1)]
 
 {- | O(n) Selects a number of columns in a given dataframe.
 
@@ -297,8 +300,8 @@ select cs df
          in result{derivingExpressions = filteredExprs}
   where
     addKeyValue d k = fromMaybe df $ do
-        col <- getColumn k df
-        pure $ insertColumn k col d
+        col' <- getColumn k df
+        pure $ insertColumn k col' d
 
 data SelectionCriteria
     = ColumnProperty (Column -> Bool)
@@ -352,7 +355,7 @@ selectBy xs df = select finalSelection df
   where
     finalSelection = Prelude.filter (`S.member` columnsWithProperties) (columnNames df)
     columnsWithProperties = S.fromList (L.foldl' columnWithProperty [] xs)
-    columnWithProperty acc (ColumnName name) = acc ++ [name]
+    columnWithProperty acc (ColumnName colName) = acc ++ [colName]
     columnWithProperty acc (ColumnNameProperty f) = acc ++ L.filter f (columnNames df)
     columnWithProperty acc (ColumnTextRange (from, to)) =
         acc
@@ -361,9 +364,9 @@ selectBy xs df = select finalSelection df
     columnWithProperty acc (ColumnIndexRange (from, to)) = acc ++ Prelude.take (to - from + 1) (Prelude.drop from (columnNames df))
     columnWithProperty acc (ColumnProperty f) =
         acc
-            ++ map fst (L.filter (\(k, v) -> v `elem` ixs) (M.toAscList (columnIndices df)))
+            ++ map fst (L.filter (\(_k, v) -> v `elem` ixs) (M.toAscList (columnIndices df)))
       where
-        ixs = V.ifoldl' (\acc i c -> if f c then i : acc else acc) [] (columns df)
+        ixs = V.ifoldl' (\acc' i c -> if f c then i : acc' else acc') [] (columns df)
 
 {- | O(n) inverse of select
 
@@ -454,7 +457,7 @@ kFolds pureGen folds df =
 generateRandomVector :: (RandomGen g) => g -> Int -> VU.Vector Double
 generateRandomVector pureGen k = VU.fromList $ go pureGen k
   where
-    go g 0 = []
+    go _g 0 = []
     go g n =
         let
             (v, g') = uniformR (0 :: Double, 1 :: Double) g
@@ -463,24 +466,24 @@ generateRandomVector pureGen k = VU.fromList $ go pureGen k
 
 -- | Convert any Column to a vector of Text labels (one per row).
 columnToTextVec :: Column -> V.Vector T.Text
-columnToTextVec (BoxedColumn bm (col :: V.Vector a)) =
+columnToTextVec (BoxedColumn bm (col' :: V.Vector a)) =
     case bm of
         Nothing -> case testEquality (typeRep @a) (typeRep @T.Text) of
-            Just Refl -> col
-            Nothing -> V.map (T.pack . show) col
+            Just Refl -> col'
+            Nothing -> V.map (T.pack . show) col'
         Just bitmap ->
-            V.imap (\i x -> if bitmapTestBit bitmap i then T.pack (show x) else "null") col
-columnToTextVec (UnboxedColumn bm col) =
+            V.imap (\i x -> if bitmapTestBit bitmap i then T.pack (show x) else "null") col'
+columnToTextVec (UnboxedColumn bm col') =
     case bm of
-        Nothing -> V.map (T.pack . show) (V.convert col)
+        Nothing -> V.map (T.pack . show) (V.convert col')
         Just bitmap ->
-            V.generate (VU.length col) $ \i ->
-                if bitmapTestBit bitmap i then T.pack (show (col VU.! i)) else "null"
+            V.generate (VU.length col') $ \i ->
+                if bitmapTestBit bitmap i then T.pack (show (col' VU.! i)) else "null"
 
 -- | Build a map from stringified label to row indices.
 groupByIndices :: Column -> M.Map T.Text (VU.Vector Int)
-groupByIndices col =
-    let textVec = columnToTextVec col
+groupByIndices col' =
+    let textVec = columnToTextVec col'
         (grouped, _) =
             V.foldl'
                 (\(!m, !i) key -> (M.insertWith (++) key [i] m, i + 1))
@@ -509,10 +512,10 @@ stratifiedSample ::
     (SplittableGen g, Columnable a) =>
     g -> Double -> Expr a -> DataFrame -> DataFrame
 stratifiedSample gen p strataCol df =
-    let col = case strataCol of
-            Col name -> unsafeGetColumn name df
+    let col' = case strataCol of
+            Col colName -> unsafeGetColumn colName df
             _ -> unwrapTypedColumn (either throw id (interpret @a df strataCol))
-        groups = M.elems (groupByIndices col)
+        groups = M.elems (groupByIndices col')
         go _ [] = mempty
         go g (ixs : rest) =
             let stratum = rowsAtIndices ixs df
@@ -533,10 +536,10 @@ stratifiedSplit ::
     (SplittableGen g, Columnable a) =>
     g -> Double -> Expr a -> DataFrame -> (DataFrame, DataFrame)
 stratifiedSplit gen p strataCol df =
-    let col = case strataCol of
-            Col name -> unsafeGetColumn name df
+    let col' = case strataCol of
+            Col colName -> unsafeGetColumn colName df
             _ -> unwrapTypedColumn (either throw id (interpret @a df strataCol))
-        groups = M.elems (groupByIndices col)
+        groups = M.elems (groupByIndices col')
         go _ [] = (mempty, mempty)
         go g (ixs : rest) =
             let stratum = rowsAtIndices ixs df

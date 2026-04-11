@@ -87,13 +87,13 @@ readTsv path = fst <$> readSeparated '\t' defaultOptions path
 readSeparated ::
     Char -> ReadOptions -> FilePath -> IO (DataFrame, (Integer, T.Text, Int))
 readSeparated c opts path = do
-    totalRows <- case totalRows opts of
+    totalRows' <- case totalRows opts of
         Nothing ->
             countRows c path >>= \total -> if hasHeader opts then return (total - 1) else return total
         Just n -> if hasHeader opts then return (n - 1) else return n
-    let (_, len) = case rowRange opts of
-            Nothing -> (0, totalRows)
-            Just (start, len) -> (start, min len (totalRows - rowsRead opts))
+    let (_, len') = case rowRange opts of
+            Nothing -> (0, totalRows')
+            Just (start, len'') -> (start, min len'' (totalRows' - rowsRead opts))
     withFile path ReadMode $ \handle -> do
         firstRow <- fmap T.strip . parseSep c <$> TIO.hGetLine handle
         let columnNames =
@@ -109,7 +109,7 @@ readSeparated c opts path = do
 
         -- Initialize mutable vectors for each column
         let numColumns = length columnNames
-        let numRows = len
+        let numRows = len'
         -- Use this row to infer the types of the rest of the column.
         (dataRow, remainder) <- readSingleLine c (leftOver opts) handle
 
@@ -169,13 +169,13 @@ fillColumns ::
     IO (T.Text, Int)
 fillColumns n c mutableCols nullIndices unused handle = do
     input <- newIORef unused
-    rowsRead <- newIORef (0 :: Int)
+    rowsRead' <- newIORef (0 :: Int)
     forM_ [1 .. (n - 1)] $ \i -> do
-        isEOF <- hIsEOF handle
+        atEOF <- hIsEOF handle
         input' <- readIORef input
-        unless (isEOF && input' == mempty) $ do
+        unless (atEOF && input' == mempty) $ do
             parseWith (TIO.hGetChunk handle) (parseRow c) input' >>= \case
-                Fail unconsumed ctx er -> do
+                Fail _unconsumed ctx er -> do
                     erpos <- hTell handle
                     fail $
                         "Failed to parse CSV file around "
@@ -188,10 +188,10 @@ fillColumns n c mutableCols nullIndices unused handle = do
                     fail "Partial handler is called"
                 Done (unconsumed :: T.Text) (row :: [T.Text]) -> do
                     writeIORef input unconsumed
-                    modifyIORef rowsRead (+ 1)
+                    modifyIORef rowsRead' (+ 1)
                     zipWithM_ (writeValue mutableCols nullIndices i) [0 ..] row
     l <- readIORef input
-    r <- readIORef rowsRead
+    r <- readIORef rowsRead'
     pure (l, r)
 {-# INLINE fillColumns #-}
 
@@ -206,7 +206,7 @@ writeValue ::
 writeValue mutableCols nullIndices count colIndex value = do
     col <- VM.unsafeRead mutableCols colIndex
     res <- writeColumn count value col
-    let modify value = VM.unsafeModify nullIndices ((count, value) :) colIndex
+    let modify val = VM.unsafeModify nullIndices ((count, val) :) colIndex
     either modify (const (return ())) res
 {-# INLINE writeValue #-}
 
@@ -392,12 +392,12 @@ getNthFieldBs sep targetIdx bs
                             else go idx start inQ (pos + 1)
 
     extract s e =
-        let field = BS.take (e - s) (BS.drop s bs)
-         in if BS.length field >= 2
-                && BS.head field == quoteChar
-                && BS.last field == quoteChar
-                then BS.init (BS.tail field)
-                else field
+        let fieldVal = BS.take (e - s) (BS.drop s bs)
+         in if BS.length fieldVal >= 2
+                && BS.head fieldVal == quoteChar
+                && BS.last fieldVal == quoteChar
+                then BS.init (BS.tail fieldVal)
+                else fieldVal
 {-# INLINE getNthFieldBs #-}
 
 -- | Allocate a fresh 'MutableColumn' for @n@ slots based on a 'SchemaType'.

@@ -1,4 +1,3 @@
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Main where
@@ -69,7 +68,7 @@ tests =
             ++ LazyParquet.tests
 
 isSuccessful :: Result -> Bool
-isSuccessful (Success{..}) = True
+isSuccessful (Success{}) = True
 isSuccessful _ = False
 
 main :: IO ()

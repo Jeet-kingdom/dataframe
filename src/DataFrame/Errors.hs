@@ -108,14 +108,14 @@ columnsNotFound missingColumns callPoint availableColumns =
             ++ "]"
 
 typeMismatchError :: String -> String -> String
-typeMismatchError givenType expectedType =
+typeMismatchError givenType expType =
     red $
         red "\n\n[Error]: Type Mismatch"
             ++ "\n\tWhile running your code I tried to "
             ++ "get a column of type: "
             ++ red (show givenType)
             ++ " but the column in the dataframe was actually of type: "
-            ++ green (show expectedType)
+            ++ green (show expType)
 
 emptyDataSetError :: T.Text -> String
 emptyDataSetError callPoint =

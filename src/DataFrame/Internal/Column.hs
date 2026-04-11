@@ -235,10 +235,10 @@ allMissing _ = False
 
 -- | Checks if a column contains numeric values.
 isNumeric :: Column -> Bool
-isNumeric (UnboxedColumn _ (vec :: VU.Vector a)) = case sNumeric @a of
+isNumeric (UnboxedColumn _ (_vec :: VU.Vector a)) = case sNumeric @a of
     STrue -> True
     _ -> False
-isNumeric (BoxedColumn _ (vec :: VB.Vector a)) = case testEquality (typeRep @a) (typeRep @Integer) of
+isNumeric (BoxedColumn _ (_vec :: VB.Vector a)) = case testEquality (typeRep @a) (typeRep @Integer) of
     Nothing -> False
     Just Refl -> True
 
@@ -248,8 +248,8 @@ also returns @True@ when @a = Maybe b@ and the column stores @b@ internally.
 -}
 hasElemType :: forall a. (Columnable a) => Column -> Bool
 hasElemType = \case
-    BoxedColumn bm (column :: VB.Vector b) -> checkBoxed bm (typeRep @b)
-    UnboxedColumn bm (column :: VU.Vector b) -> checkUnboxed bm (typeRep @b)
+    BoxedColumn bm (_column :: VB.Vector b) -> checkBoxed bm (typeRep @b)
+    UnboxedColumn bm (_column :: VU.Vector b) -> checkUnboxed bm (typeRep @b)
   where
     -- Direct type match
     directMatch :: forall (b :: Type). TypeRep b -> Bool
@@ -576,9 +576,9 @@ columnLength (UnboxedColumn _ xs) = VU.length xs
 -- | O(n) Gets the number of non-null elements in the column.
 numElements :: Column -> Int
 numElements (BoxedColumn Nothing xs) = VB.length xs
-numElements (BoxedColumn (Just bm) xs) = VU.foldl' (\acc b -> acc + popCount b) 0 bm
+numElements (BoxedColumn (Just bm) _xs) = VU.foldl' (\acc b -> acc + popCount b) 0 bm
 numElements (UnboxedColumn Nothing xs) = VU.length xs
-numElements (UnboxedColumn (Just bm) xs) = VU.foldl' (\acc b -> acc + popCount b) 0 bm
+numElements (UnboxedColumn (Just bm) _xs) = VU.foldl' (\acc b -> acc + popCount b) 0 bm
 {-# INLINE numElements #-}
 
 -- | O(n) Takes the first n values of a column.
@@ -690,7 +690,7 @@ findIndices ::
     (a -> Bool) ->
     Column ->
     Either DataFrameException (VU.Vector Int)
-findIndices pred = \case
+findIndices predicate = \case
     BoxedColumn _ (v :: VB.Vector b) -> run v VG.convert
     UnboxedColumn _ (v :: VU.Vector b) -> run v id
   where
@@ -701,7 +701,7 @@ findIndices pred = \case
         (v Int -> VU.Vector Int) ->
         Either DataFrameException (VU.Vector Int)
     run column finalize = case testEquality (typeRep @a) (typeRep @b) of
-        Just Refl -> Right . finalize $ VG.findIndices pred column
+        Just Refl -> Right . finalize $ VG.findIndices predicate column
         Nothing ->
             Left $
                 TypeMismatchException
@@ -1238,7 +1238,7 @@ concatManyColumns (c0 : cs) = case c0 of
                         expandedBms = map (\(v, mb) -> fromMaybe (allValidBitmap (VB.length v)) mb) pairs
                         go b1 n1 b2 n2 = bitmapConcat n1 b1 n2 b2
                         concatBms [] = VU.empty
-                        concatBms [(b, v)] = b
+                        concatBms [(b, _v)] = b
                         concatBms ((b1, v1) : (b2, v2) : rest') =
                             let merged = go b1 (VB.length v1) b2 (VB.length v2)
                              in concatBms ((merged, v1 <> v2) : rest')
@@ -1634,7 +1634,7 @@ toIntVector column =
         UnboxedColumn _ (f :: VU.Vector a) -> case testEquality (typeRep @a) (typeRep @Int) of
             Just Refl -> Right f
             Nothing -> case sFloating @a of
-                STrue -> Right (VU.map (round . realToFrac) f)
+                STrue -> Right (VU.map (round . (realToFrac :: a -> Double)) f)
                 SFalse -> case sIntegral @a of
                     STrue -> Right (VU.map fromIntegral f)
                     SFalse ->

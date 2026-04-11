@@ -89,7 +89,7 @@ applyManyOnlyGivenFields =
                 ( map (,D.fromList $ replicate 26 (1 :: Integer)) ["test4", "test6"]
                     ++
                     -- All other fields should have their original values.
-                    filter (\(name, col) -> name /= "test4" && name /= "test6") values
+                    filter (\(name, _col) -> name /= "test4" && name /= "test6") values
                 )
             )
             ( D.applyMany @Char

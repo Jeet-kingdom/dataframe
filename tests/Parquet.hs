@@ -36,10 +36,10 @@ import GHC.IO (unsafePerformIO)
 import Test.HUnit
 
 testBothReadParquetPaths :: ((FilePath -> IO D.DataFrame) -> Test) -> Test
-testBothReadParquetPaths test =
+testBothReadParquetPaths mkTest =
     TestList
-        [ test D.readParquet
-        , test (DP._readParquetWithOpts (Just True) D.defaultParquetReadOptions)
+        [ mkTest D.readParquet
+        , mkTest (DP._readParquetWithOpts (Just True) D.defaultParquetReadOptions)
         ]
 
 assertColumnNullability ::

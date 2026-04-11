@@ -48,7 +48,7 @@ infixr 0 .=
 (|>) = (&)
 
 as :: (Columnable a) => Expr a -> T.Text -> NamedExpr
-as expr name = (name, UExpr expr)
+as expr colName = (colName, UExpr expr)
 
 name :: (Show a) => Expr a -> T.Text
 name (Col n) = n
@@ -71,7 +71,7 @@ lit = Lit
 liftDecorated ::
     (Columnable a, Columnable b) =>
     (a -> b) -> T.Text -> Maybe T.Text -> Expr a -> Expr b
-liftDecorated f name rep = Unary (MkUnaryOp{unaryFn = f, unaryName = name, unarySymbol = rep})
+liftDecorated f opName rep = Unary (MkUnaryOp{unaryFn = f, unaryName = opName, unarySymbol = rep})
 
 lift2Decorated ::
     (Columnable c, Columnable b, Columnable a) =>
@@ -83,11 +83,11 @@ lift2Decorated ::
     Expr c ->
     Expr b ->
     Expr a
-lift2Decorated f name rep comm prec =
+lift2Decorated f opName rep comm prec =
     Binary
         ( MkBinaryOp
             { binaryFn = f
-            , binaryName = name
+            , binaryName = opName
             , binarySymbol = rep
             , binaryCommutative = comm
             , binaryPrecedence = prec

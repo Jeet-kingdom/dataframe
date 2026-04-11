@@ -234,7 +234,7 @@ instance (Floating a, Columnable a) => Floating (Expr a) where
             (MkUnaryOp{unaryFn = atanh, unaryName = "atanh", unarySymbol = Nothing})
 
 instance (Show a) => Show (Expr a) where
-    show :: forall a. (Show a) => Expr a -> String
+    show :: Expr a -> String
     show (Col name) = "(col @" ++ show (typeRep @a) ++ " " ++ show name ++ ")"
     show (CastWith name tag _) = "(castWith " ++ show tag ++ " " ++ show name ++ ")"
     show (CastExprWith tag _ inner) = "(castExprWith " ++ show tag ++ " " ++ show inner ++ ")"
@@ -278,7 +278,7 @@ compareExpr e1 e2 = compare (exprKey e1) (exprKey e2)
     exprKey (Lit val) = "1:" ++ show val
     exprKey (If c t e) = "2:" ++ exprKey c ++ exprKey t ++ exprKey e
     exprKey (Unary op e) = "3:" ++ T.unpack (unaryName op) ++ exprKey e
-    exprKey (Binary op e1 e2) = "4:" ++ T.unpack (binaryName op) ++ exprKey e1 ++ exprKey e2
+    exprKey (Binary op e1' e2') = "4:" ++ T.unpack (binaryName op) ++ exprKey e1' ++ exprKey e2'
     exprKey (Agg (CollectAgg name _) e) = "5:" ++ T.unpack name ++ exprKey e
     exprKey (Agg (FoldAgg name _ _) e) = "5:" ++ T.unpack name ++ exprKey e
     exprKey (Agg (MergeAgg name _ _ _ _) e) = "5:" ++ T.unpack name ++ exprKey e
@@ -329,7 +329,7 @@ replaceExpr new old expr = case testEquality (typeRep @b) (typeRep @c) of
             If (replaceExpr new old cond) (replaceExpr new old l) (replaceExpr new old r)
         (Unary op value) -> Unary op (replaceExpr new old value)
         (Binary op l r) -> Binary op (replaceExpr new old l) (replaceExpr new old r)
-        (Agg op expr) -> Agg op (replaceExpr new old expr)
+        (Agg op inner) -> Agg op (replaceExpr new old inner)
 
 eSize :: Expr a -> Int
 eSize (Col _) = 1
@@ -339,17 +339,17 @@ eSize (Lit _) = 1
 eSize (If c l r) = 1 + eSize c + eSize l + eSize r
 eSize (Unary _ e) = 1 + eSize e
 eSize (Binary _ l r) = 1 + eSize l + eSize r
-eSize (Agg strategy expr) = eSize expr + 1
+eSize (Agg _strategy expr) = eSize expr + 1
 
 getColumns :: Expr a -> [T.Text]
 getColumns (Col cName) = [cName]
 getColumns (CastWith name _ _) = [name]
 getColumns (CastExprWith _ _ e) = getColumns e
-getColumns expr@(Lit _) = []
+getColumns _expr@(Lit _) = []
 getColumns (If cond l r) = getColumns cond <> getColumns l <> getColumns r
-getColumns (Unary op value) = getColumns value
-getColumns (Binary op l r) = getColumns l <> getColumns r
-getColumns (Agg strategy expr) = getColumns expr
+getColumns (Unary _op value) = getColumns value
+getColumns (Binary _op l r) = getColumns l <> getColumns r
+getColumns (Agg _strategy expr) = getColumns expr
 
 prettyPrint :: Expr a -> String
 prettyPrint = go 0 0

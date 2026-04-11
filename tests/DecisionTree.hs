@@ -1,6 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
+{-# OPTIONS_GHC -Wno-x-partial #-}
 
 module DecisionTree where
 
@@ -676,9 +677,9 @@ probsSumToOne = TestCase $ do
         sumExpr = foldl1 (.+) (M.elems pe)
     case interpret @Double fixtureDF sumExpr of
         Left e -> assertFailure (show e)
-        Right (DI.TColumn col) ->
-            case DI.toVector @Double col of
-                Left e -> assertFailure (show e)
+        Right (DI.TColumn sumCol) ->
+            case DI.toVector @Double sumCol of
+                Left e2 -> assertFailure (show e2)
                 Right vals ->
                     mapM_
                         (\v -> assertBool ("sum ≈ 1.0, got " ++ show v) (abs (v - 1.0) < 1e-9))
@@ -695,14 +696,14 @@ probArgmaxMatchesClassifier = TestCase $ do
         Left e -> assertFailure (show e)
         Right (DI.TColumn hardCol) ->
             case DI.toVector @T.Text hardCol of
-                Left e -> assertFailure (show e)
+                Left e2 -> assertFailure (show e2)
                 Right hardVals -> do
                     probCols <-
                         mapM
                             ( \(cls, expr) -> case interpret @Double sepDF expr of
-                                Left e -> assertFailure (show e) >> return (cls, V.empty)
-                                Right (DI.TColumn col) -> case DI.toVector @Double col of
-                                    Left e -> assertFailure (show e) >> return (cls, V.empty)
+                                Left e3 -> assertFailure (show e3) >> return (cls, V.empty)
+                                Right (DI.TColumn col2) -> case DI.toVector @Double col2 of
+                                    Left e4 -> assertFailure (show e4) >> return (cls, V.empty)
                                     Right v -> return (cls, v)
                             )
                             (M.toList pe)

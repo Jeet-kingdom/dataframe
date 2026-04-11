@@ -242,14 +242,14 @@ parseWithTypes safe ts df
   where
     asType :: SchemaType -> Column -> Column
     asType (SType (_ :: P.Proxy a)) c@(BoxedColumn _ (col :: V.Vector b)) = case typeRep @a of
-        App t1 t2 -> case eqTypeRep t1 (typeRep @Maybe) of
+        App t1 _t2 -> case eqTypeRep t1 (typeRep @Maybe) of
             Just HRefl -> case testEquality (typeRep @a) (typeRep @b) of
                 Just Refl -> c
                 Nothing -> case testEquality (typeRep @T.Text) (typeRep @b) of
                     Just Refl -> fromVector (V.map (join . (readAsMaybe @a) . T.unpack) col)
                     Nothing -> fromVector (V.map (join . (readAsMaybe @a) . show) col)
             Nothing -> case t1 of
-                App t1' t2' -> case eqTypeRep t1' (typeRep @Either) of
+                App t1' _t2' -> case eqTypeRep t1' (typeRep @Either) of
                     Just HRefl -> case testEquality (typeRep @a) (typeRep @b) of
                         Just Refl -> c
                         Nothing -> case testEquality (typeRep @T.Text) (typeRep @b) of
@@ -288,6 +288,6 @@ readAsMaybe s
 readAsEither :: (Read a) => String -> a
 readAsEither v = case asum [readMaybe $ "Left " <> s, readMaybe $ "Right " <> s] of
     Nothing -> error $ "Couldn't read value: " <> s
-    Just v -> v
+    Just v' -> v'
   where
     s = if null v then "\"\"" else v

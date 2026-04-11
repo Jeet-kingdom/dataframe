@@ -85,7 +85,7 @@ decodeRLEBitPackedHybrid bw need bs
 
 decodeDictIndicesV1 ::
     Int -> Int -> BS.ByteString -> (VU.Vector Int, BS.ByteString)
-decodeDictIndicesV1 need dictCard bs =
+decodeDictIndicesV1 need _dictCard bs =
     case BS.uncons bs of
         Nothing -> error "empty dictionary index stream"
         Just (w0, rest0) ->

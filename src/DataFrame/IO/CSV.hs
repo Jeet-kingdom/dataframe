@@ -323,7 +323,7 @@ decodeSeparated !opts csvData = do
 
 initializeColumns ::
     [T.Text] -> [BL.ByteString] -> ReadOptions -> IO [BuilderColumn]
-initializeColumns names row opts = zipWithM initColumn names (map lookupType names)
+initializeColumns names _row opts = zipWithM initColumn names (map lookupType names)
   where
     typeMap = schemaTypeMap (typeSpec opts)
     -- Return Nothing for columns that should be inferred from BS
@@ -356,8 +356,8 @@ processStream _ _ _ (Just 0) = return ()
 processStream missing (Cons (Right row) rest) cols n =
     processRow missing row cols
         >> processStream missing rest cols (fmap (flip (-) 1) n)
-processStream missing (Cons (Left err) _) _ _ = error ("CSV Parse Error: " ++ err)
-processStream missing (Nil _ _) _ _ = return ()
+processStream _missing (Cons (Left err) _) _ _ = error ("CSV Parse Error: " ++ err)
+processStream _missing (Nil _ _) _ _ = return ()
 
 processRow ::
     [T.Text] -> V.Vector BL.ByteString -> V.Vector BuilderColumn -> IO ()
@@ -460,7 +460,7 @@ handleBSBool asMaybe
     parsableAsBool = vecSameConstructor asMaybe asMaybeBool
 
 handleBSInt :: String -> V.Vector (Maybe BS.ByteString) -> Column
-handleBSInt dfmt asMaybe
+handleBSInt _dfmt asMaybe
     | parsableAsInt =
         maybe (fromVector asMaybeInt) fromVector (sequenceA asMaybeInt)
     | parsableAsDouble =

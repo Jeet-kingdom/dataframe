@@ -146,10 +146,10 @@ asText d properMarkdown =
                         else "Nothing"
         get (Just (UnboxedColumn Nothing column)) = V.map (T.pack . show) (V.convert column)
         get Nothing = V.empty
-        getTextColumnFromFrame df (i, name) = get $ (V.!?) (columns d) ((M.!) (columnIndices d) name)
+        getTextColumnFromFrame _df (_i, name) = get $ (V.!?) (columns d) ((M.!) (columnIndices d) name)
         rows =
             transpose $
-                zipWith (curry (V.toList . getTextColumnFromFrame d)) [0 ..] header
+                zipWith (curry (V.toList . getTextColumnFromFrame d)) [(0 :: Int) ..] header
      in showTable properMarkdown header types rows
 
 -- | O(1) Creates an empty dataframe

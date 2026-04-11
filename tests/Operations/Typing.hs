@@ -94,7 +94,7 @@ parseInts =
     let afterParse :: [Int]
         afterParse = [1 .. 50]
         beforeParse :: [T.Text]
-        beforeParse = T.pack . show <$> [1 .. 50]
+        beforeParse = T.pack . show <$> ([1 .. 50] :: [Int])
         expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $
@@ -114,7 +114,9 @@ parseDoubles =
         beforeParse :: [T.Text]
         beforeParse =
             T.pack . show
-                <$> [1.0 .. 50.0] ++ [3.14, 2.22, 8.55, 23.3, 12.22222235049450945049504950]
+                <$> ( [1.0 .. 50.0] ++ [3.14, 2.22, 8.55, 23.3, 12.22222235049450945049504950] ::
+                        [Double]
+                    )
         expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault (D.defaultParseOptions{D.sampleSize = 10}) $

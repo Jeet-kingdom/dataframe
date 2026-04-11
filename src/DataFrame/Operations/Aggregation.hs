@@ -62,8 +62,8 @@ groupBy names df
             (VU.fromList [0])
             VU.empty
     | otherwise =
-        let !vis = VU.map fst valueIndices
-            !os = changingPoints valueIndices
+        let !vis = VU.map fst valIndices
+            !os = changingPoints valIndices
             !n = fst (dimensions df)
          in Grouped
                 df
@@ -75,7 +75,7 @@ groupBy names df
     indicesToGroup = M.elems $ M.filterWithKey (\k _ -> k `elem` names) (columnIndices df)
     doubleToInt :: Double -> Int
     doubleToInt = floor . (* 1000)
-    valueIndices = runST $ do
+    valIndices = runST $ do
         let n = fst (dimensions df)
         mv <- VUM.new n
 
@@ -183,9 +183,9 @@ changingPoints vs =
         (VU.fromList (VU.length vs : fst (VU.ifoldl' findChangePoints initialState vs)))
   where
     initialState = ([0], snd (VU.head vs))
-    findChangePoints (!offsets, !currentVal) index (_, !newVal)
-        | currentVal == newVal = (offsets, currentVal)
-        | otherwise = (index : offsets, newVal)
+    findChangePoints (!offs, !currentVal) index (_, !newVal)
+        | currentVal == newVal = (offs, currentVal)
+        | otherwise = (index : offs, newVal)
 
 computeRowHashes :: [Int] -> DataFrame -> VU.Vector Int
 computeRowHashes indices df = runST $ do
@@ -275,11 +275,11 @@ computeRowHashes indices df = runST $ do
 All ungrouped columns will be dropped.
 -}
 aggregate :: [NamedExpr] -> GroupedDataFrame -> DataFrame
-aggregate aggs gdf@(Grouped df groupingColumns valueIndices offsets _rowToGroup) =
+aggregate aggs gdf@(Grouped df groupingColumns valIndices offs _rowToGroup) =
     let
         df' =
             selectIndices
-                (VU.map (valueIndices VU.!) (VU.init offsets))
+                (VU.map (valIndices VU.!) (VU.init offs))
                 (select groupingColumns df)
 
         f (name, UExpr (expr :: Expr a)) d =

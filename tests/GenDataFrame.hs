@@ -1,5 +1,6 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE TypeApplications #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module GenDataFrame where
 
@@ -39,4 +40,4 @@ genUniqueColName = T.pack <$> listOf1 (elements ['a' .. 'z'])
 
 instance Arbitrary DataFrame where
     arbitrary = genDataFrame
-    shrink df = []
+    shrink _df = []

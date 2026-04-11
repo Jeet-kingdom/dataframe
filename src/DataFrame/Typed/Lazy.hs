@@ -91,7 +91,7 @@ import DataFrame.Typed.Schema
 import DataFrame.Typed.Types
 
 -- | A lazy query with compile-time schema tracking.
-newtype TypedLazyDataFrame (cols :: [Type]) = TLD {unTLD :: LazyDataFrame}
+newtype TypedLazyDataFrame (cols :: [Type]) = TLD {_unTLD :: LazyDataFrame}
 
 instance Show (TypedLazyDataFrame cols) where
     show (TLD ldf) = "TypedLazyDataFrame { " ++ show ldf ++ " }"
@@ -154,7 +154,7 @@ select (TLD ldf) = TLD (L.select (DataFrame.Typed.Schema.symbolVals @names) ldf)
 
 -- | A typed lazy grouped query.
 newtype TypedLazyGrouped (keys :: [Symbol]) (cols :: [Type]) = TLG
-    { unTLG :: ([T.Text], LazyDataFrame)
+    { _unTLG :: ([T.Text], LazyDataFrame)
     }
 
 -- | Group by key columns.
