@@ -1,5 +1,20 @@
 # Revision history for dataframe
 
+## 1.1.1.0
+### New features
+* Add `DataFrame.Typed.Lazy` module — a type-safe lazy query pipeline combining compile-time schema tracking with deferred execution.
+* Add `fromCsv` function for parsing a CSV string directly into a DataFrame.
+* Add `DataKinds` extension and `DataFrame.Typed` import to the GHCi file for easier interactive typed dataframe workflows.
+
+### Performance
+* Specialize and inline aggregation functions (`sum`, `mean`, `variance`, `median`, `stddev`, etc.) to avoid expensive numeric conversions at runtime.
+* Remove `Ord` constraint from `Columnable'` and move it to call sites, reducing unnecessary constraint propagation.
+* Replace exponential type-level `If` nesting in typed schema families with linear helper type families, fixing slow compilation times.
+
+### Bug fixes
+* Fix Functions module compilation under GHC 9.10 (#194).
+* Document and test `safeColumns` option in `ParquetReadOptions` (#190).
+
 ## 1.1.0.0
 ### Breaking changes
 * Remove `OptionalColumn` constructor; fold nullability into `BoxedColumn`/`UnboxedColumn` via bit-packed bitmap.
