@@ -16,17 +16,17 @@ import qualified DataFrame.Typed as DT
 import System.Random
 
 $( DT.deriveSchemaFromCsvFileWith
-    D.defaultReadOptions{D.safeRead = True}
+    D.defaultReadOptions{D.safeRead = D.MaybeRead}
     "TrainSchema"
     "./data/titanic/train.csv"
  )
 $( DT.deriveSchemaFromCsvFileWith
-    D.defaultReadOptions{D.safeRead = True}
+    D.defaultReadOptions{D.safeRead = D.MaybeRead}
     "TestSchema"
     "./data/titanic/test.csv"
  )
 
--- Survived is Maybe Int (safeRead = True); prediction is Int (model output).
+-- Survived is Maybe Int (safeRead = MaybeRead); prediction is Int (model output).
 type RawPredSchema =
     '[DT.Column "Survived" (Maybe Int), DT.Column "prediction" Int]
 

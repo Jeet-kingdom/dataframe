@@ -32,11 +32,13 @@ import DataFrame.Internal.Column (
     columnLength,
     ensureOptional,
     freezeColumn',
+    freezeColumnEither,
     writeColumn,
  )
 import DataFrame.Internal.DataFrame (DataFrame (..))
 import DataFrame.Internal.Parsing
 import DataFrame.Internal.Schema (Schema, SchemaType (..), elements)
+import DataFrame.Operations.Typing (SafeReadMode (..), effectiveSafeRead)
 import System.IO
 import Type.Reflection
 import Prelude hiding (takeWhile)
@@ -45,7 +47,12 @@ import Prelude hiding (takeWhile)
 data ReadOptions = ReadOptions
     { hasHeader :: Bool
     , inferTypes :: Bool
-    , safeRead :: Bool
+    , safeRead :: SafeReadMode
+    {- ^ Default 'SafeReadMode' for columns without an entry in
+    'safeReadOverrides'.
+    -}
+    , safeReadOverrides :: [(T.Text, SafeReadMode)]
+    -- ^ Per-column 'SafeReadMode' overrides; takes precedence over 'safeRead'.
     , rowRange :: !(Maybe (Int, Int)) -- (start, length)
     , seekPos :: !(Maybe Integer)
     , totalRows :: !(Maybe Int)
@@ -53,15 +60,19 @@ data ReadOptions = ReadOptions
     , rowsRead :: !Int
     }
 
-{- | By default we assume the file has a header, we infer the types on read
-and we convert any rows with nullish objects into Maybe (safeRead).
+{- | By default we assume the file has a header and we infer types on read.
+'safeRead' starts as 'NoSafeRead' — set it to 'MaybeRead' to wrap columns as
+@Maybe a@, or 'EitherRead' to wrap as @Either Text a@ preserving the raw text
+of any rows that fail to parse. Use 'safeReadOverrides' to pick a different
+mode for specific columns.
 -}
 defaultOptions :: ReadOptions
 defaultOptions =
     ReadOptions
         { hasHeader = True
         , inferTypes = True
-        , safeRead = False
+        , safeRead = NoSafeRead
+        , safeReadOverrides = []
         , rowRange = Nothing
         , seekPos = Nothing
         , totalRows = Nothing
@@ -125,7 +136,11 @@ readSeparated c opts path = do
 
         -- Freeze the mutable vectors into immutable ones
         nulls' <- V.unsafeFreeze nullIndices
-        cols <- V.mapM (freezeColumn mutableCols nulls' opts) (V.generate numColumns id)
+        let !columnNamesV = V.fromList columnNames
+        cols <-
+            V.mapM
+                (freezeColumn columnNamesV mutableCols nulls' opts)
+                (V.generate numColumns id)
         pos <- hTell handle
 
         return
@@ -212,15 +227,26 @@ writeValue mutableCols nullIndices count colIndex value = do
 
 -- | Freezes a mutable vector into an immutable one, trimming it to the actual row count.
 freezeColumn ::
+    V.Vector T.Text ->
     VM.IOVector MutableColumn ->
     V.Vector [(Int, T.Text)] ->
     ReadOptions ->
     Int ->
     IO Column
-freezeColumn mutableCols nulls opts colIndex = do
+freezeColumn colNames mutableCols nulls opts colIndex = do
     col <- VM.unsafeRead mutableCols colIndex
-    frozen <- freezeColumn' (nulls V.! colIndex) col
-    return $! if safeRead opts then ensureOptional frozen else frozen
+    let colNulls = nulls V.! colIndex
+        mode =
+            effectiveSafeRead
+                (safeRead opts)
+                (safeReadOverrides opts)
+                (colNames V.! colIndex)
+    case mode of
+        EitherRead -> freezeColumnEither colNulls col
+        MaybeRead -> do
+            frozen <- freezeColumn' colNulls col
+            return $! ensureOptional frozen
+        NoSafeRead -> freezeColumn' colNulls col
 {-# INLINE freezeColumn #-}
 
 -- ---------------------------------------------------------------------------

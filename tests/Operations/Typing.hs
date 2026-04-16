@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Operations.Typing where
 
@@ -9,10 +10,11 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import qualified DataFrame as D
 import qualified DataFrame.Internal.Column as DI
+import DataFrame.Internal.DataFrame (getColumn)
 import qualified DataFrame.Operations.Typing as D
 
 import Data.Time (Day, fromGregorian)
-import Test.HUnit (Test (TestCase, TestLabel), assertEqual)
+import Test.HUnit (Test (TestCase, TestLabel), assertEqual, assertFailure)
 
 testData :: D.DataFrame
 testData =
@@ -262,7 +264,7 @@ parseBoolsWithoutSafeRead =
         expected = DI.UnboxedColumn Nothing $ VU.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -279,7 +281,7 @@ parseIntsWithoutSafeRead =
         expected = DI.UnboxedColumn Nothing $ VU.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -296,7 +298,7 @@ parseDoublesWithoutSafeRead =
         expected = DI.UnboxedColumn Nothing $ VU.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -313,7 +315,7 @@ parseDatesWithoutSafeRead =
         expected = DI.BoxedColumn Nothing $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -329,7 +331,7 @@ parseTextsWithoutSafeRead = TestCase $ do
     let expected = DI.BoxedColumn Nothing $ V.fromList texts
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList texts
     assertEqual
@@ -346,7 +348,7 @@ parseBoolsAndEmptyStringsWithoutSafeRead =
         expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -364,7 +366,7 @@ parseIntsAndEmptyStringsWithoutSafeRead =
         expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -395,7 +397,7 @@ parseIntsAndDoublesAndEmptyStringsWithoutSafeRead =
         expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -415,7 +417,7 @@ parseDatesAndEmptyStringsWithoutSafeRead =
         expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -435,7 +437,7 @@ parseTextsAndEmptyStringsWithoutSafeRead = TestCase $ do
         expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList raw
     assertEqual
@@ -452,7 +454,7 @@ parseBoolsAndNullishStringsWithoutSafeRead =
         expected = DI.BoxedColumn Nothing $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -470,7 +472,7 @@ parseIntsAndNullishStringsWithoutSafeRead =
         expected = DI.BoxedColumn Nothing $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -500,7 +502,7 @@ parseIntsAndDoublesAndNullishStringsWithoutSafeRead =
         expected = DI.BoxedColumn Nothing $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -526,7 +528,7 @@ parseIntsAndNullishAndEmptyStringsWithoutSafeRead =
         expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -545,7 +547,7 @@ parseTextsAndEmptyAndNullishStringsWithoutSafeRead = TestCase $ do
         expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 10, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList raw
     assertEqual
@@ -781,6 +783,284 @@ parseTextsAndEmptyAndNullishStringsWithSafeRead = TestCase $ do
         expected
         actual
 
+-- 3C. PARSING WITH SAFEREAD = EitherRead
+--
+-- EitherRead wraps every column as @Either Text a@: successful parses become
+-- @Right v@; failures (including nullish/empty cells) become @Left <raw>@
+-- preserving the original input verbatim.
+
+parseBoolsWithEitherRead :: Test
+parseBoolsWithEitherRead =
+    let beforeParse :: [T.Text]
+        beforeParse = ["true", "", "false", "N/A", "True"]
+        afterParse :: [Either T.Text Bool]
+        afterParse =
+            [Right True, Left "", Right False, Left "N/A", Right True]
+        expected = DI.fromVector $ V.fromList afterParse
+        actual =
+            D.parseDefault
+                (D.defaultParseOptions{D.sampleSize = 5, D.parseSafe = D.EitherRead})
+                $ DI.fromVector
+                $ V.fromList beforeParse
+     in TestCase
+            ( assertEqual
+                "EitherRead wraps Bools as Either Text Bool; failures carry raw text"
+                expected
+                actual
+            )
+
+parseIntsWithEitherRead :: Test
+parseIntsWithEitherRead =
+    -- Sample (first 5 rows) is cleanly Int; later rows exercise the Left path.
+    let beforeParse :: [T.Text]
+        beforeParse = ["1", "2", "3", "4", "42", "abc", "", "N/A"]
+        afterParse :: [Either T.Text Int]
+        afterParse =
+            [ Right 1
+            , Right 2
+            , Right 3
+            , Right 4
+            , Right 42
+            , Left "abc"
+            , Left ""
+            , Left "N/A"
+            ]
+        expected = DI.fromVector $ V.fromList afterParse
+        actual =
+            D.parseDefault
+                (D.defaultParseOptions{D.sampleSize = 5, D.parseSafe = D.EitherRead})
+                $ DI.fromVector
+                $ V.fromList beforeParse
+     in TestCase
+            ( assertEqual
+                "EitherRead wraps Ints as Either Text Int; failures carry raw text"
+                expected
+                actual
+            )
+
+parseDoublesWithEitherRead :: Test
+parseDoublesWithEitherRead =
+    -- Sample is cleanly Double; "oops" / "" come after and must surface as Left.
+    let beforeParse :: [T.Text]
+        beforeParse = ["1.5", "2.0", "3.5", "4.25", "3.14", "oops", ""]
+        afterParse :: [Either T.Text Double]
+        afterParse =
+            [ Right 1.5
+            , Right 2.0
+            , Right 3.5
+            , Right 4.25
+            , Right 3.14
+            , Left "oops"
+            , Left ""
+            ]
+        expected = DI.fromVector $ V.fromList afterParse
+        actual =
+            D.parseDefault
+                (D.defaultParseOptions{D.sampleSize = 5, D.parseSafe = D.EitherRead})
+                $ DI.fromVector
+                $ V.fromList beforeParse
+     in TestCase
+            ( assertEqual
+                "EitherRead wraps Doubles as Either Text Double; failures carry raw text"
+                expected
+                actual
+            )
+
+parseTextsWithEitherRead :: Test
+parseTextsWithEitherRead =
+    let beforeParse :: [T.Text]
+        beforeParse = ["hello", "", "world"]
+        afterParse :: [Either T.Text T.Text]
+        afterParse = [Right "hello", Left "", Right "world"]
+        expected = DI.fromVector $ V.fromList afterParse
+        actual =
+            D.parseDefault
+                (D.defaultParseOptions{D.sampleSize = 3, D.parseSafe = D.EitherRead})
+                $ DI.fromVector
+                $ V.fromList beforeParse
+     in TestCase
+            ( assertEqual
+                "EitherRead wraps Texts as Either Text Text; empty cells become Left \"\""
+                expected
+                actual
+            )
+
+parseDatesWithEitherRead :: Test
+parseDatesWithEitherRead =
+    -- Sample is clean dates; "not-a-date" and "" come after and become Left.
+    let beforeParse :: [T.Text]
+        beforeParse =
+            (T.pack . show <$> take 5 datesExpected) ++ ["not-a-date", ""]
+        expectedGood :: [Either T.Text Day]
+        expectedGood = Right <$> take 5 datesExpected
+        expectedBad :: [Either T.Text Day]
+        expectedBad = [Left "not-a-date", Left ""]
+        expected = DI.fromVector $ V.fromList (expectedGood ++ expectedBad)
+        actual =
+            D.parseDefault
+                (D.defaultParseOptions{D.sampleSize = 5, D.parseSafe = D.EitherRead})
+                $ DI.fromVector
+                $ V.fromList beforeParse
+     in TestCase
+            ( assertEqual
+                "EitherRead wraps Dates as Either Text Day; failures carry raw text"
+                expected
+                actual
+            )
+
+-- parseDefaults honours per-column overrides: 'ages' stays strict Int,
+-- 'notes' is wrapped as Either Text Text.
+parseDefaultsPerColumnOverrides :: Test
+parseDefaultsPerColumnOverrides = TestCase $ do
+    let df =
+            D.fromNamedColumns
+                [ ("ages", DI.fromList @T.Text ["1", "2", "3"])
+                , ("notes", DI.fromList @T.Text ["hello", "", "world"])
+                ]
+        opts =
+            D.defaultParseOptions
+                { D.sampleSize = 3
+                , D.parseSafe = D.MaybeRead
+                , D.parseSafeOverrides =
+                    [ ("ages", D.NoSafeRead)
+                    , ("notes", D.EitherRead)
+                    ]
+                }
+        result = D.parseDefaults opts df
+    case getColumn "ages" result of
+        Just (DI.UnboxedColumn Nothing _) -> pure () -- strict Int
+        Just col ->
+            assertFailure $
+                "'ages' should be bare UnboxedColumn, got "
+                    <> show col
+        Nothing -> assertFailure "ages column missing"
+    let expectedNotes =
+            DI.fromList @(Either T.Text T.Text)
+                [Right "hello", Left "", Right "world"]
+    case getColumn "notes" result of
+        Just col ->
+            assertEqual
+                "'notes' override EitherRead → Either Text Text"
+                expectedNotes
+                col
+        Nothing -> assertFailure "notes column missing"
+
+-- Default=NoSafeRead, single override to MaybeRead.
+parseDefaultsNoSafeReadWithMaybeOverride :: Test
+parseDefaultsNoSafeReadWithMaybeOverride = TestCase $ do
+    let df =
+            D.fromNamedColumns
+                [ ("x", DI.fromList @T.Text ["1", "2", "3"])
+                , ("y", DI.fromList @T.Text ["a", "", "c"])
+                ]
+        opts =
+            D.defaultParseOptions
+                { D.sampleSize = 3
+                , D.parseSafe = D.NoSafeRead
+                , D.parseSafeOverrides = [("y", D.MaybeRead)]
+                }
+        result = D.parseDefaults opts df
+    -- 'x': NoSafeRead default → bare Int, no bitmap.
+    case getColumn "x" result of
+        Just (DI.UnboxedColumn Nothing _) -> pure ()
+        Just col ->
+            assertFailure $
+                "'x' should be bare UnboxedColumn, got " <> show col
+        Nothing -> assertFailure "x column missing"
+    -- 'y': MaybeRead override → nullable Text with bitmap.
+    case getColumn "y" result of
+        Just (DI.BoxedColumn (Just _) _) -> pure ()
+        Just col ->
+            assertFailure $
+                "'y' MaybeRead override should yield nullable column, got " <> show col
+        Nothing -> assertFailure "y column missing"
+
+-- Default=EitherRead, single override to NoSafeRead.
+parseDefaultsEitherReadWithNoSafeOverride :: Test
+parseDefaultsEitherReadWithNoSafeOverride = TestCase $ do
+    let df =
+            D.fromNamedColumns
+                [ ("nums", DI.fromList @T.Text ["10", "20", "30"])
+                , ("tags", DI.fromList @T.Text ["foo", "", "baz"])
+                ]
+        opts =
+            D.defaultParseOptions
+                { D.sampleSize = 3
+                , D.parseSafe = D.EitherRead
+                , D.parseSafeOverrides = [("nums", D.NoSafeRead)]
+                }
+        result = D.parseDefaults opts df
+    -- 'nums': NoSafeRead override → bare Int.
+    case getColumn "nums" result of
+        Just (DI.UnboxedColumn Nothing _) -> pure ()
+        Just col ->
+            assertFailure $
+                "'nums' NoSafeRead override should give bare UnboxedColumn, got "
+                    <> show col
+        Nothing -> assertFailure "nums column missing"
+    -- 'tags': default EitherRead → Either Text Text.
+    let expectedTags =
+            DI.fromList @(Either T.Text T.Text) [Right "foo", Left "", Right "baz"]
+    case getColumn "tags" result of
+        Just col ->
+            assertEqual "'tags' inherits EitherRead default" expectedTags col
+        Nothing -> assertFailure "tags column missing"
+
+-- Empty overrides: behaves identically to no overrides.
+parseDefaultsEmptyOverrides :: Test
+parseDefaultsEmptyOverrides = TestCase $ do
+    let df =
+            D.fromNamedColumns
+                [("v", DI.fromList @T.Text ["1", "2", "3"])]
+        opts1 = D.defaultParseOptions{D.sampleSize = 3}
+        opts2 = opts1{D.parseSafeOverrides = []}
+    assertEqual
+        "empty parseSafeOverrides ≡ no overrides"
+        (D.parseDefaults opts1 df)
+        (D.parseDefaults opts2 df)
+
+-- Override for non-existent column: silently ignored, no crash.
+parseDefaultsNonExistentOverride :: Test
+parseDefaultsNonExistentOverride = TestCase $ do
+    let df =
+            D.fromNamedColumns
+                [("a", DI.fromList @T.Text ["1", "2", "3"])]
+        opts =
+            D.defaultParseOptions
+                { D.sampleSize = 3
+                , D.parseSafeOverrides = [("z", D.EitherRead)]
+                }
+        result = D.parseDefaults opts df
+    -- 'a' should parse normally under the default (MaybeRead).
+    case getColumn "a" result of
+        Just (DI.UnboxedColumn (Just _) _) -> pure ()
+        Just col ->
+            assertFailure $
+                "'a' should be nullable UnboxedColumn under MaybeRead default, got "
+                    <> show col
+        Nothing -> assertFailure "a column missing"
+
+parseAllNullWithEitherRead :: Test
+parseAllNullWithEitherRead =
+    -- NoAssumption path: sample is all empty/nullish so inference can't
+    -- pick a numeric type. EitherRead still wraps as Either Text Text.
+    let beforeParse :: [T.Text]
+        beforeParse = ["", "", "", "N/A", ""]
+        afterParse :: [Either T.Text T.Text]
+        afterParse = [Left "", Left "", Left "", Right "N/A", Left ""]
+        expected = DI.fromVector $ V.fromList afterParse
+        actual =
+            D.parseDefault
+                (D.defaultParseOptions{D.sampleSize = 5, D.parseSafe = D.EitherRead})
+                $ DI.fromVector
+                $ V.fromList beforeParse
+     in TestCase
+            ( assertEqual
+                "EitherRead with all-null sample produces Either Text Text"
+                expected
+                actual
+            )
+
 -- 4. PARSING SHOULD NOT DEPEND ON THE NUMBER OF EXAMPLES.
 parseBoolsWithOneExample :: Test
 parseBoolsWithOneExample =
@@ -946,7 +1226,8 @@ parseIntsAndDoublesAndEmptyStringsAsDoublesWithOneExampleWithSafeReadOff =
                 ++ map Just doublesSpecial
         expected = DI.fromVector $ V.fromList afterParse
         actual =
-            D.parseDefault (D.defaultParseOptions{D.sampleSize = 1, D.parseSafe = False}) $
+            D.parseDefault
+                (D.defaultParseOptions{D.sampleSize = 1, D.parseSafe = D.NoSafeRead}) $
                 DI.fromVector $
                     V.fromList beforeParse
      in TestCase
@@ -973,7 +1254,7 @@ parseIntsAndDoublesAndEmptyStringsAsDoublesWithManyExamplesWithSafeReadOff =
         expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 30, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 30, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -1003,7 +1284,8 @@ parseIntsAndDoublesAndEmptyStringsAndNullishAsStringssWithOneExampleWithSafeRead
                 ++ map Just doublesSpecialInput
         expected = DI.fromVector $ V.fromList afterParse
         actual =
-            D.parseDefault (D.defaultParseOptions{D.sampleSize = 1, D.parseSafe = False}) $
+            D.parseDefault
+                (D.defaultParseOptions{D.sampleSize = 1, D.parseSafe = D.NoSafeRead}) $
                 DI.fromVector $
                     V.fromList beforeParse
      in TestCase
@@ -1033,7 +1315,7 @@ parseIntsAndDoublesAndEmptyStringsAndNullishAsStringssWithManyExamplesWithSafeRe
         expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 30, D.parseSafe = False})
+                (D.defaultParseOptions{D.sampleSize = 30, D.parseSafe = D.NoSafeRead})
                 $ DI.fromVector
                 $ V.fromList beforeParse
      in TestCase
@@ -1198,6 +1480,28 @@ tests =
            , TestLabel
                 "parseTextsAndEmptyAndNullishStringsWithSafeRead"
                 parseTextsAndEmptyAndNullishStringsWithSafeRead
+           , -- 3C. PARSING WITH EitherRead
+             TestLabel "parseBoolsWithEitherRead" parseBoolsWithEitherRead
+           , TestLabel "parseIntsWithEitherRead" parseIntsWithEitherRead
+           , TestLabel "parseDoublesWithEitherRead" parseDoublesWithEitherRead
+           , TestLabel "parseTextsWithEitherRead" parseTextsWithEitherRead
+           , TestLabel "parseDatesWithEitherRead" parseDatesWithEitherRead
+           , TestLabel "parseAllNullWithEitherRead" parseAllNullWithEitherRead
+           , TestLabel
+                "parseDefaultsPerColumnOverrides"
+                parseDefaultsPerColumnOverrides
+           , TestLabel
+                "parseDefaultsNoSafeReadWithMaybeOverride"
+                parseDefaultsNoSafeReadWithMaybeOverride
+           , TestLabel
+                "parseDefaultsEitherReadWithNoSafeOverride"
+                parseDefaultsEitherReadWithNoSafeOverride
+           , TestLabel
+                "parseDefaultsEmptyOverrides"
+                parseDefaultsEmptyOverrides
+           , TestLabel
+                "parseDefaultsNonExistentOverride"
+                parseDefaultsNonExistentOverride
            , -- 4. PARSING MUST NOT DEPEND ON THE NUMBER OF EXAMPLES
              TestLabel "parseBoolsWithOneExample" parseBoolsWithOneExample
            , TestLabel "parseBoolsWithManyExamples" parseBoolsWithManyExamples

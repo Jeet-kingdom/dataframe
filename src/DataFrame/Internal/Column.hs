@@ -1088,6 +1088,33 @@ freezeColumn' nulls (MUnboxedColumn col)
                     )
 {-# INLINE freezeColumn' #-}
 
+{- | Freeze a mutable column into an @Either Text a@ column: every recorded
+null position becomes @Left rawText@ (preserving the original input), every
+other position becomes @Right v@. Used by CSV readers under 'EitherRead' mode.
+-}
+freezeColumnEither :: [(Int, T.Text)] -> MutableColumn -> IO Column
+freezeColumnEither nulls (MBoxedColumn col) = do
+    frozen <- VB.unsafeFreeze col
+    let nullMap = nulls
+    pure $
+        BoxedColumn Nothing $
+            VB.imap
+                ( \i v -> case lookup i nullMap of
+                    Just t -> Left t
+                    Nothing -> Right v
+                )
+                frozen
+freezeColumnEither nulls (MUnboxedColumn col) = do
+    c <- VU.unsafeFreeze col
+    let nullMap = nulls
+    pure $
+        BoxedColumn Nothing $
+            VB.generate (VU.length c) $ \i ->
+                case lookup i nullMap of
+                    Just t -> Left t
+                    Nothing -> Right (c VU.! i)
+{-# INLINE freezeColumnEither #-}
+
 {- | Promote a non-nullable column to a nullable one (add an all-valid bitmap).
 No-op when already nullable.
 -}
