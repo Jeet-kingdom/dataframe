@@ -1227,9 +1227,9 @@ parseIntsAndDoublesAndEmptyStringsAsDoublesWithOneExampleWithSafeReadOff =
         expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 1, D.parseSafe = D.NoSafeRead}) $
-                DI.fromVector $
-                    V.fromList beforeParse
+                (D.defaultParseOptions{D.sampleSize = 1, D.parseSafe = D.NoSafeRead})
+                $ DI.fromVector
+                $ V.fromList beforeParse
      in TestCase
             ( assertEqual
                 "Correctly parses a mixture of Ints and Doubles as UnboxedColumn of Doubles with just one example"
@@ -1285,9 +1285,9 @@ parseIntsAndDoublesAndEmptyStringsAndNullishAsStringssWithOneExampleWithSafeRead
         expected = DI.fromVector $ V.fromList afterParse
         actual =
             D.parseDefault
-                (D.defaultParseOptions{D.sampleSize = 1, D.parseSafe = D.NoSafeRead}) $
-                DI.fromVector $
-                    V.fromList beforeParse
+                (D.defaultParseOptions{D.sampleSize = 1, D.parseSafe = D.NoSafeRead})
+                $ DI.fromVector
+                $ V.fromList beforeParse
      in TestCase
             ( assertEqual
                 "Correctly parses a mixture of Ints, Doubles, empty strings, nullish as OptionalColumn of Text with just one example, when safeRead is off"

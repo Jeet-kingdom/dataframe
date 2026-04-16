@@ -13,8 +13,8 @@ import qualified Data.Vector as V
 
 import Control.Applicative (asum)
 import Control.Monad (join)
-import qualified Data.Proxy as P
 import Data.Maybe (fromMaybe)
+import qualified Data.Proxy as P
 import Data.Time
 import Data.Type.Equality (TestEquality (..))
 import DataFrame.Internal.Column (
