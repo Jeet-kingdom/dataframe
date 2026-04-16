@@ -33,6 +33,7 @@ import qualified Operations.Statistics
 import qualified Operations.Subset
 import qualified Operations.Take
 import qualified Operations.Typing
+import qualified Operations.Window
 import qualified Operations.WriteCsv
 import qualified Parquet
 import qualified Properties
@@ -61,6 +62,7 @@ tests =
             ++ Operations.Subset.hunitTests
             ++ Operations.Take.tests
             ++ Operations.Typing.tests
+            ++ Operations.Window.tests
             ++ Functions.tests
             ++ IO.CSV.tests
             ++ IO.JSON.tests

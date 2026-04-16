@@ -32,10 +32,12 @@ import Data.Type.Equality (TestEquality (testEquality), type (:~:) (Refl))
 import qualified Data.Vector as V
 import qualified Data.Vector.Generic as VG
 import qualified Data.Vector.Unboxed as VU
+import qualified Data.Vector.Unboxed.Mutable as VUM
 import DataFrame.Errors
 import DataFrame.Internal.Column
 import DataFrame.Internal.DataFrame
 import DataFrame.Internal.Expression
+import qualified DataFrame.Internal.Grouping as G
 import DataFrame.Internal.Types
 import Type.Reflection (
     Typeable,
@@ -456,6 +458,15 @@ sliceGroups col os indices = case col of
 numGroups :: GroupedDataFrame -> Int
 numGroups gdf = VU.length (offsets gdf) - 1
 
+-- | Build the inverse of a permutation vector.
+invertPermutation :: VU.Vector Int -> VU.Vector Int
+invertPermutation perm = VU.create $ do
+    let !n = VU.length perm
+    inv <- VUM.new n
+    VU.imapM_ (flip (VUM.unsafeWrite inv)) perm
+    return inv
+{-# INLINE invertPermutation #-}
+
 -------------------------------------------------------------------------------
 -- promoteColumnWith: unified numeric / text coercion for CastWith
 -------------------------------------------------------------------------------
@@ -798,6 +809,29 @@ eval ctx expr@(If cond l r) = addContext expr $ do
     rv <- eval @a ctx r
     branchValue c lv rv
 
+-- Over (window function) -------------------------------------------------
+
+eval (FlatCtx df) expr@(Over keys inner) = addContext expr $ do
+    let gdf = G.groupBy keys df
+    v <- eval (GroupCtx gdf) inner
+    case v of
+        Scalar s ->
+            Right (Scalar s)
+        Flat groupCol ->
+            -- Scalar agg (mean, sum, median): one value per group.
+            -- Broadcast via rowToGroup: row i gets value at group rowToGroup[i].
+            Right (Flat (atIndicesStable (rowToGroup gdf) groupCol))
+        Group groupCols -> do
+            -- Concatenate in sorted order, then unsort to original row order.
+            sorted <- V.fold1M' concatColumns groupCols
+            let inv = invertPermutation (valueIndices gdf)
+            Right (Flat (atIndicesStable inv sorted))
+eval (GroupCtx _) expr@(Over _ _) =
+    addContext expr $
+        Left
+            ( InternalException
+                "Over (window function) is not supported inside a grouped context"
+            )
 -- Fast path: FoldAgg (seeded) on a bare Col in GroupCtx.
 -- Avoids the O(n) backpermute in sliceGroups by folding directly over
 -- permuted indices.  Only matches when inner is exactly (Col name).

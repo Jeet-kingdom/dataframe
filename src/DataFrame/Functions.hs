@@ -582,6 +582,23 @@ bind ::
     (a -> m b) -> Expr (m a) -> Expr (m b)
 bind f = liftDecorated (>>= f) "bind" Nothing
 
+{- | Window function: evaluate an expression partitioned by the given columns.
+
+Each partition computes the inner expression independently, and the result
+is broadcast back to every row in that partition. This is analogous to
+Polars' @.over()@ or SQL @OVER (PARTITION BY ...)@.
+
+@
+-- Per-country median, broadcast to every row:
+F.over [\"country\"] (F.median (F.col \@Double \"amount\"))
+
+-- Deviation from group mean:
+F.col \@Double \"amount\" - F.over [\"group\"] (F.mean (F.col \@Double \"amount\"))
+@
+-}
+over :: (Columnable a) => [T.Text] -> Expr a -> Expr a
+over = Over
+
 -- See Section 2.4 of the Haskell Report https://www.haskell.org/definition/haskell2010.pdf
 isReservedId :: T.Text -> Bool
 isReservedId t = case t of

@@ -72,6 +72,7 @@ data Expr a where
         BinaryOp c b a -> Expr c -> Expr b -> Expr a
     If :: (Columnable a) => Expr Bool -> Expr a -> Expr a -> Expr a
     Agg :: (Columnable a, Columnable b) => AggStrategy a b -> Expr b -> Expr a
+    Over :: (Columnable a) => [T.Text] -> Expr a -> Expr a
 
 data UExpr where
     UExpr :: (Columnable a) => Expr a -> UExpr
@@ -245,6 +246,7 @@ instance (Show a) => Show (Expr a) where
     show (Agg (CollectAgg op _) expr) = "(" ++ T.unpack op ++ " " ++ show expr ++ ")"
     show (Agg (FoldAgg op _ _) expr) = "(" ++ T.unpack op ++ " " ++ show expr ++ ")"
     show (Agg (MergeAgg op _ _ _ _) expr) = "(" ++ T.unpack op ++ " " ++ show expr ++ ")"
+    show (Over keys inner) = "(over " ++ show keys ++ " " ++ show inner ++ ")"
 
 normalize :: (Show a, Typeable a) => Expr a -> Expr a
 normalize expr = case expr of
@@ -266,6 +268,7 @@ normalize expr = case expr of
                             else Binary op n1 n2
         | otherwise -> Binary op (normalize e1) (normalize e2)
     Agg strat e -> Agg strat (normalize e)
+    Over keys inner -> Over keys (normalize inner)
 
 -- Compare expressions for ordering (used in normalization)
 compareExpr :: Expr a -> Expr a -> Ordering
@@ -282,6 +285,7 @@ compareExpr e1 e2 = compare (exprKey e1) (exprKey e2)
     exprKey (Agg (CollectAgg name _) e) = "5:" ++ T.unpack name ++ exprKey e
     exprKey (Agg (FoldAgg name _ _) e) = "5:" ++ T.unpack name ++ exprKey e
     exprKey (Agg (MergeAgg name _ _ _ _) e) = "5:" ++ T.unpack name ++ exprKey e
+    exprKey (Over keys e) = "6:over:" ++ show keys ++ exprKey e
 
 instance (Ord a, Columnable a) => Ord (Expr a) where
     compare l r = compareExpr (normalize l) (normalize r)
@@ -308,6 +312,7 @@ instance (Eq a, Columnable a) => Eq (Expr a) where
             n1 == n2 && e1 `exprEq` e2
         eqNormalized (Agg (MergeAgg n1 _ _ _ _) e1) (Agg (MergeAgg n2 _ _ _ _) e2) =
             n1 == n2 && e1 `exprEq` e2
+        eqNormalized (Over k1 e1) (Over k2 e2) = k1 == k2 && e1 `exprEq` e2
         eqNormalized _ _ = False
 
 replaceExpr ::
@@ -330,6 +335,7 @@ replaceExpr new old expr = case testEquality (typeRep @b) (typeRep @c) of
         (Unary op value) -> Unary op (replaceExpr new old value)
         (Binary op l r) -> Binary op (replaceExpr new old l) (replaceExpr new old r)
         (Agg op inner) -> Agg op (replaceExpr new old inner)
+        (Over keys inner) -> Over keys (replaceExpr new old inner)
 
 eSize :: Expr a -> Int
 eSize (Col _) = 1
@@ -340,6 +346,7 @@ eSize (If c l r) = 1 + eSize c + eSize l + eSize r
 eSize (Unary _ e) = 1 + eSize e
 eSize (Binary _ l r) = 1 + eSize l + eSize r
 eSize (Agg _strategy expr) = eSize expr + 1
+eSize (Over _ inner) = 1 + eSize inner
 
 getColumns :: Expr a -> [T.Text]
 getColumns (Col cName) = [cName]
@@ -350,6 +357,7 @@ getColumns (If cond l r) = getColumns cond <> getColumns l <> getColumns r
 getColumns (Unary _op value) = getColumns value
 getColumns (Binary _op l r) = getColumns l <> getColumns r
 getColumns (Agg _strategy expr) = getColumns expr
+getColumns (Over keys inner) = keys <> getColumns inner
 
 prettyPrint :: Expr a -> String
 prettyPrint = go 0 0
@@ -389,3 +397,4 @@ prettyPrint = go 0 0
         Agg (CollectAgg op _) arg -> T.unpack op ++ "(" ++ go depth 0 arg ++ ")"
         Agg (FoldAgg op _ _) arg -> T.unpack op ++ "(" ++ go depth 0 arg ++ ")"
         Agg (MergeAgg op _ _ _ _) arg -> T.unpack op ++ "(" ++ go depth 0 arg ++ ")"
+        Over keys inner -> go depth 0 inner ++ ".over(" ++ show (map T.unpack keys) ++ ")"
