@@ -47,6 +47,7 @@ import DataFrame.Errors
 import DataFrame.Internal.Parsing
 import DataFrame.Internal.Types
 import System.IO.Unsafe (unsafePerformIO)
+import System.Random
 import Type.Reflection
 
 -- | A bit-packed validity bitmap. Bit @i@ = 1 means row @i@ is valid (not null).
@@ -449,6 +450,30 @@ fromList ::
     (Columnable a, ColumnifyRep (KindOf a) a) =>
     [a] -> Column
 fromList = toColumnRep @(KindOf a) . VB.fromList
+
+{- | O(n) Create a column of random elements within a range.
+
+Takes a random number generator, a length, and a lower and upper bound for the random values.
+
+__Examples:__
+
+@
+> import System.Random (mkStdGen)
+> mkRandom (mkStdGen 42) 4 0 10
+[4,2,6,5]
+@
+-}
+mkRandom ::
+    (RandomGen g, Columnable a, ColumnifyRep (KindOf a) a, UniformRange a) =>
+    g -> Int -> a -> a -> Column
+mkRandom pureGen k lo hi = fromList $ go pureGen k
+  where
+    go _g 0 = []
+    go g n =
+        let
+            (!v, !g') = uniformR (lo, hi) g
+         in
+            v : go g' (n - 1)
 
 -- An internal helper for type errors
 throwTypeMismatch ::

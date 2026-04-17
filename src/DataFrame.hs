@@ -275,6 +275,7 @@ import DataFrame.Internal.Column as Column (
     hasElemType,
     hasMissing,
     isNumeric,
+    mkRandom,
     toList,
     toVector,
  )

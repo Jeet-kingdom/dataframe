@@ -392,11 +392,11 @@ ghci> D.sample (mkStdGen 137) 0.1 df
 sample :: (RandomGen g) => g -> Double -> DataFrame -> DataFrame
 sample pureGen p df =
     let
-        rand = generateRandomVector pureGen (fst (dataframeDimensions df))
+        rand = mkRandom pureGen (fst (dataframeDimensions df)) (0 :: Double) 1
         cRand = col @Double "__rand__"
      in
         df
-            & insertUnboxedVector (name cRand) rand
+            & insertColumn (name cRand) rand
             & filterWhere (cRand .>=. Lit (1 - p))
             & exclude [name cRand]
 
@@ -413,9 +413,9 @@ randomSplit ::
     (RandomGen g) => g -> Double -> DataFrame -> (DataFrame, DataFrame)
 randomSplit pureGen p df =
     let
-        rand = generateRandomVector pureGen (fst (dataframeDimensions df))
+        rand = mkRandom pureGen (fst (dataframeDimensions df)) (0 :: Double) 1
         cRand = col @Double "__rand__"
-        withRand = df & insertUnboxedVector (name cRand) rand
+        withRand = df & insertColumn (name cRand) rand
      in
         ( withRand
             & filterWhere (cRand .<=. Lit p)
@@ -438,9 +438,9 @@ ghci> D.kFolds (mkStdGen 137) 5 df
 kFolds :: (RandomGen g) => g -> Int -> DataFrame -> [DataFrame]
 kFolds pureGen folds df =
     let
-        rand = generateRandomVector pureGen (fst (dataframeDimensions df))
+        rand = mkRandom pureGen (fst (dataframeDimensions df)) (0 :: Double) 1
         cRand = col @Double "__rand__"
-        withRand = df & insertUnboxedVector (name cRand) rand
+        withRand = df & insertColumn (name cRand) rand
         partitionSize = 1 / fromIntegral folds
         singleFold n d =
             d & filterWhere (cRand .>=. Lit (fromIntegral n * partitionSize))
@@ -453,16 +453,6 @@ kFolds pureGen folds df =
                 d' : go (n - 1) d''
      in
         map (exclude [name cRand]) (go (folds - 1) withRand)
-
-generateRandomVector :: (RandomGen g) => g -> Int -> VU.Vector Double
-generateRandomVector pureGen k = VU.fromList $ go pureGen k
-  where
-    go _g 0 = []
-    go g n =
-        let
-            (v, g') = uniformR (0 :: Double, 1 :: Double) g
-         in
-            v : go g' (n - 1)
 
 -- | Convert any Column to a vector of Text labels (one per row).
 columnToTextVec :: Column -> V.Vector T.Text
