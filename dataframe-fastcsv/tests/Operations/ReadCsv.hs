@@ -448,6 +448,9 @@ testUnclosedQuote = TestLabel "malformed_unclosed_quote" $ TestCase $ do
     removeFile path
     case (result :: Either CsvParseError DataFrame) of
         Left CsvUnclosedQuote -> return ()
+        Left other ->
+            assertFailure
+                ("expected CsvUnclosedQuote, got " <> show other)
         Right _ ->
             assertFailure
                 "readCsvFast should have thrown CsvUnclosedQuote on input with a stray quote"

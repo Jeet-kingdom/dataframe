@@ -192,7 +192,7 @@ size_t get_delimiter_indices(uint8_t *buf, size_t len, uint8_t separator, size_t
 #else
   // SIMD not available or carryless multiplication not supported.
   // Signal fallback to Haskell implementation.
-  (void)buf; (void)len; (void)indices;
+  (void)buf; (void)len; (void)separator; (void)indices;
   return (size_t)-1;
 #endif
 }
