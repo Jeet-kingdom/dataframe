@@ -1,5 +1,11 @@
 # Revision history for dataframe
 
+## 1.1.2.0
+* Safe read can now choose between Either and Maybe for error handling.
+* Add countAll and over (window) functions.
+* Add mkRandom to make random columns.
+* Faster CSV parsing.
+
 ## 1.1.1.0
 ### New features
 * Add `DataFrame.Typed.Lazy` module — a type-safe lazy query pipeline combining compile-time schema tracking with deferred execution.
