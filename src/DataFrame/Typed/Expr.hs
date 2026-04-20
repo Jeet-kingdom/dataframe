@@ -105,6 +105,7 @@ module DataFrame.Typed.Expr (
     sum,
     mean,
     count,
+    countAll,
     minimum,
     maximum,
     collect,
@@ -529,6 +530,10 @@ mean (TExpr e) = TExpr (F.mean e)
 
 count :: (Columnable a) => TExpr cols a -> TExpr cols Int
 count (TExpr e) = TExpr (F.count e)
+
+-- | Row count, the equivalent of SQL's @COUNT(*)@.
+countAll :: TExpr cols Int
+countAll = TExpr F.countAll
 
 minimum :: (Columnable a, Ord a) => TExpr cols a -> TExpr cols a
 minimum (TExpr e) = TExpr (F.minimum e)

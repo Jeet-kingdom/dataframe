@@ -104,6 +104,7 @@ module DataFrame.Typed (
     DataFrame.Typed.Expr.sum,
     mean,
     count,
+    countAll,
     DataFrame.Typed.Expr.minimum,
     DataFrame.Typed.Expr.maximum,
     collect,

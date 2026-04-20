@@ -910,10 +910,7 @@ eval ctx expr@(Agg (FoldAgg _ (Just seed) (f :: a -> b -> a)) inner) =
     addContext expr $ do
         v <- eval @b ctx inner
         case v of
-            Scalar _ ->
-                Left $
-                    InternalException
-                        "Cannot apply a fold aggregation to a scalar"
+            Scalar x -> Right (broadcastFold ctx seed f x)
             Flat col ->
                 Scalar <$> foldlColumn @b @a f seed col
             Group gs ->
@@ -931,10 +928,14 @@ eval
         addContext expr $ do
             v <- eval @b ctx inner
             case v of
-                Scalar _ ->
-                    Left $
-                        InternalException
-                            "Cannot apply a merge aggregation to a scalar"
+                Scalar x -> case broadcastFold ctx seed step x of
+                    Scalar acc -> Right (Scalar (finalize acc))
+                    Flat col -> Flat <$> mapColumn @acc @a finalize col
+                    Group _ ->
+                        Left
+                            ( InternalException
+                                "broadcastFold unexpectedly produced a Group value"
+                            )
                 Flat col ->
                     Scalar . finalize <$> foldlColumn @b step seed col
                 Group gs ->
@@ -957,16 +958,34 @@ eval ctx expr@(Agg (FoldAgg _ Nothing (f :: a -> b -> a)) inner) =
                     Scalar _ ->
                         Left $
                             InternalException
-                                "Cannot apply a fold aggregation to a scalar"
+                                "fold1 requires at least one element"
                     Flat col ->
                         Scalar <$> foldl1Column @a f col
                     Group gs ->
                         Flat . fromVector
                             <$> V.mapM (foldl1Column @a f) gs
 
--------------------------------------------------------------------------------
--- Aggregation helpers
--------------------------------------------------------------------------------
+broadcastFold ::
+    forall acc b.
+    (Columnable acc) =>
+    Ctx -> acc -> (acc -> b -> acc) -> b -> Value acc
+broadcastFold (FlatCtx df) seed step x =
+    let n = fst (dataframeDimensions df)
+     in Scalar (iterateStep n step seed x)
+broadcastFold (GroupCtx gdf) seed step x =
+    let offs = offsets gdf
+        ng = VU.length offs - 1
+        results =
+            V.generate ng $ \i ->
+                let sz = offs VU.! (i + 1) - offs VU.! i
+                 in iterateStep sz step seed x
+     in Flat (fromVector results)
+
+iterateStep :: Int -> (acc -> b -> acc) -> acc -> b -> acc
+iterateStep n step = go n
+  where
+    go 0 !acc _ = acc
+    go k !acc x = go (k - 1) (step acc x) x
 
 {- | Apply a 'CollectAgg' function to a single column, extracting the
 appropriate vector type and applying the aggregation function.
@@ -976,10 +995,6 @@ applyCollect ::
     (VG.Vector v b, Typeable v, Columnable b, Columnable a) =>
     (v b -> a) -> Column -> Either DataFrameException a
 applyCollect f col = f <$> toVector @b @v col
-
--------------------------------------------------------------------------------
--- Backward-compatible wrappers
--------------------------------------------------------------------------------
 
 {- | Result of interpreting an expression in a grouped context.
 Retained for backward compatibility with 'aggregate' and friends.
