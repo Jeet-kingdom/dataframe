@@ -39,9 +39,10 @@ import Test.QuickCheck
 import Test.QuickCheck.Monadic (PropertyM, assert, monadicIO, run)
 import Type.Reflection (typeRep)
 
--- | A generator for a single CSV cell.  Each cell starts with an ASCII
--- letter (so type inference always picks 'Text') and may contain a small
--- menagerie of special characters the parser must escape correctly.
+{- | A generator for a single CSV cell.  Each cell starts with an ASCII
+letter (so type inference always picks 'Text') and may contain a small
+menagerie of special characters the parser must escape correctly.
+-}
 newtype Cell = Cell {unCell :: T.Text}
     deriving (Eq, Show)
 
@@ -54,10 +55,11 @@ instance Arbitrary Cell where
         | T.null t || T.length t == 1 = []
         | otherwise = [Cell (T.take (T.length t - 1) t)]
 
--- | Like 'Cell' but guaranteed to contain neither @\\n@ nor @\\r@.  Used
--- by properties that diff across line-ending dialects, where embedded
--- line breaks become part of the data under CRLF transform and break
--- the otherwise-clean invariant.
+{- | Like 'Cell' but guaranteed to contain neither @\\n@ nor @\\r@.  Used
+by properties that diff across line-ending dialects, where embedded
+line breaks become part of the data under CRLF transform and break
+the otherwise-clean invariant.
+-}
 newtype SingleLineCell = SingleLineCell {unSingleLineCell :: T.Text}
     deriving (Eq, Show)
 
@@ -82,9 +84,10 @@ instance Arbitrary ColumnNames where
         | length ns <= 1 = []
         | otherwise = [ColumnNames (init ns)]
 
--- | RFC 4180 cell encoding: wrap a field in @"@ and double embedded
--- quotes when the cell contains the separator, a line break, or a
--- quote.
+{- | RFC 4180 cell encoding: wrap a field in @"@ and double embedded
+quotes when the cell contains the separator, a line break, or a
+quote.
+-}
 encodeCell :: Char -> T.Text -> T.Text
 encodeCell sep t
     | T.any needsQuote t = T.concat ["\"", T.replace "\"" "\"\"" t, "\""]
@@ -92,20 +95,22 @@ encodeCell sep t
   where
     needsQuote c = c == sep || c == '\n' || c == '\r' || c == '"'
 
--- | Encode a grid @[[cell]]@ (rows of cells) as an RFC 4180 CSV.  The
--- first row is written as the header, followed by one line per data
--- row.  Always uses @\\n@ as the line terminator; callers that need
--- CRLF can transform the output themselves.
+{- | Encode a grid @[[cell]]@ (rows of cells) as an RFC 4180 CSV.  The
+first row is written as the header, followed by one line per data
+row.  Always uses @\\n@ as the line terminator; callers that need
+CRLF can transform the output themselves.
+-}
 encodeCsv :: Char -> [T.Text] -> [[T.Text]] -> T.Text
 encodeCsv sep header rows =
     T.unlines (encodeRow header : map encodeRow rows)
   where
     encodeRow = T.intercalate (T.singleton sep) . map (encodeCell sep)
 
--- | Pull the raw 'Text' values of the named column out of a DataFrame.
--- Fails the property if the column is missing or is not a 'Text'
--- column (which would signal a type-inference accident — the cell
--- generator is designed to avoid that).
+{- | Pull the raw 'Text' values of the named column out of a DataFrame.
+Fails the property if the column is missing or is not a 'Text'
+column (which would signal a type-inference accident — the cell
+generator is designed to avoid that).
+-}
 columnAsText :: T.Text -> DataFrame -> Maybe [T.Text]
 columnAsText name df = do
     idx <- M.lookup name (columnIndices df)
@@ -117,8 +122,9 @@ columnAsText name df = do
                 Nothing -> Nothing
         UnboxedColumn{} -> Nothing
 
--- | Run a property in @IO@ against a generated CSV text, cleaning up
--- the temp file afterwards no matter what.
+{- | Run a property in @IO@ against a generated CSV text, cleaning up
+the temp file afterwards no matter what.
+-}
 withCsvFile :: String -> T.Text -> (FilePath -> IO a) -> IO a
 withCsvFile label body action = do
     let path = "/tmp/fastcsv_prop_" <> label <> ".csv"
@@ -130,8 +136,9 @@ withCsvFile label body action = do
 --------------------------------------------------------------------------------
 -- Properties
 
--- | Any CSV parses the same whether or not a UTF-8 BOM (EF BB BF) is
--- prepended.  Excel / PowerShell CSV exports all come with a BOM.
+{- | Any CSV parses the same whether or not a UTF-8 BOM (EF BB BF) is
+prepended.  Excel / PowerShell CSV exports all come with a BOM.
+-}
 prop_bom_invariant :: ColumnNames -> [[Cell]] -> Property
 prop_bom_invariant (ColumnNames header) rows = monadicIO $ do
     let cellRows = map (map unCell) rows
@@ -142,11 +149,12 @@ prop_bom_invariant (ColumnNames header) rows = monadicIO $ do
     assert (plain == withBom)
     assert (dataframeDimensions plain == dataframeDimensions withBom)
 
--- | A CSV with no embedded newlines inside quoted fields parses the
--- same whether record separators are @\\n@ or @\\r\\n@.  When quoted
--- cells themselves contain @\\n@, a CRLF-encoded file contains a literal
--- @\\r\\n@ inside the quotes (that's data, not line ending), so the
--- invariant correctly no longer holds; we filter such inputs out.
+{- | A CSV with no embedded newlines inside quoted fields parses the
+same whether record separators are @\\n@ or @\\r\\n@.  When quoted
+cells themselves contain @\\n@, a CRLF-encoded file contains a literal
+@\\r\\n@ inside the quotes (that's data, not line ending), so the
+invariant correctly no longer holds; we filter such inputs out.
+-}
 prop_crlf_invariant :: ColumnNames -> [[SingleLineCell]] -> Property
 prop_crlf_invariant (ColumnNames header) rows = monadicIO $ do
     let cellRows = map (map unSingleLineCell) rows
@@ -156,10 +164,11 @@ prop_crlf_invariant (ColumnNames header) rows = monadicIO $ do
     dfCrlf <- run $ withCsvFile "crlf_crlf" crlfCsv D.fastReadCsv
     assert (dfLf == dfCrlf)
 
--- | A DataFrame produced by the RFC 4180 encoder round-trips through
--- the fast reader: column names survive, row count survives, and every
--- cell comes back bit-for-bit.  Restricted to ASCII-letter-prefixed
--- cells so that type inference always stays on 'Text'.
+{- | A DataFrame produced by the RFC 4180 encoder round-trips through
+the fast reader: column names survive, row count survives, and every
+cell comes back bit-for-bit.  Restricted to ASCII-letter-prefixed
+cells so that type inference always stays on 'Text'.
+-}
 prop_roundtrip_ascii :: Property
 prop_roundtrip_ascii = forAll (chooseInt (0, 12)) $ \nRows ->
     forAll (chooseInt (1, 4)) $ \nCols ->
@@ -185,10 +194,11 @@ assertColumns header rows df = do
         )
         (zip header expected)
 
--- | A file that ends with an unmatched @"@ must raise 'CsvUnclosedQuote'
--- under the default policy.  The generator deliberately builds a valid
--- prefix so the property is checking the error path, not a random
--- parse failure.
+{- | A file that ends with an unmatched @"@ must raise 'CsvUnclosedQuote'
+under the default policy.  The generator deliberately builds a valid
+prefix so the property is checking the error path, not a random
+parse failure.
+-}
 prop_unclosed_quote_throws :: Property
 prop_unclosed_quote_throws = forAll (listOf1 arbitrary) $ \(cells :: [Cell]) ->
     monadicIO $ do
@@ -205,10 +215,11 @@ prop_unclosed_quote_throws = forAll (listOf1 arbitrary) $ \(cells :: [Cell]) ->
             Left CsvUnclosedQuote -> assert True
             _ -> assert False
 
--- | Files whose length sits exactly at a SIMD chunk boundary must parse
--- without an off-by-one.  We generate inputs at the key critical sizes
--- (64, 127, 128, 129, 192 bytes after the 'v\n' header) by padding a
--- single column with ASCII letters.
+{- | Files whose length sits exactly at a SIMD chunk boundary must parse
+without an off-by-one.  We generate inputs at the key critical sizes
+(64, 127, 128, 129, 192 bytes after the 'v\n' header) by padding a
+single column with ASCII letters.
+-}
 prop_boundary_sizes :: Property
 prop_boundary_sizes =
     forAll (elements [64, 127, 128, 129, 192]) $ \targetBytes ->
