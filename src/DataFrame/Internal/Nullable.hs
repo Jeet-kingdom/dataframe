@@ -379,8 +379,20 @@ instance NumericWidenOp Float Double where widen1 = realToFrac; widen2 = id
 instance NumericWidenOp Double Float where
     widen1 = id
     widen2 = realToFrac
-instance NumericWidenOp Int Float where widen1 = fromIntegral; widen2 = id
-instance NumericWidenOp Float Int where
+instance NumericWidenOp Int32 Float where widen1 = fromIntegral; widen2 = id
+instance NumericWidenOp Float Int32 where
+    widen1 = id
+    widen2 = fromIntegral
+instance NumericWidenOp Int32 Double where widen1 = fromIntegral; widen2 = id
+instance NumericWidenOp Double Int32 where
+    widen1 = id
+    widen2 = fromIntegral
+instance NumericWidenOp Int64 Float where widen1 = fromIntegral; widen2 = id
+instance NumericWidenOp Float Int64 where
+    widen1 = id
+    widen2 = fromIntegral
+instance NumericWidenOp Int64 Double where widen1 = fromIntegral; widen2 = id
+instance NumericWidenOp Double Int64 where
     widen1 = id
     widen2 = fromIntegral
 
