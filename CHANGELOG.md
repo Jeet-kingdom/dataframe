@@ -1,5 +1,9 @@
 # Revision history for dataframe
 
+## 1.1.2.1
+* Add `over` and `median` functions to typed API
+* Fix bug opening web plots in MacOS
+
 ## 1.1.2.0
 * Safe read can now choose between Either and Maybe for error handling.
 * Add countAll and over (window) functions.
