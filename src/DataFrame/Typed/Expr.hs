@@ -104,17 +104,20 @@ module DataFrame.Typed.Expr (
     -- * Aggregation combinators
     sum,
     mean,
+    median,
     count,
     countAll,
     minimum,
     maximum,
     collect,
+    over,
 
     -- * Cast / coercion expressions
     castExpr,
     castExprWithDefault,
     castExprEither,
     unsafeCastExpr,
+    toDouble,
 
     -- * Named expression helper
     as,
@@ -156,7 +159,14 @@ import DataFrame.Internal.Nullable (
  )
 import DataFrame.Internal.Types (Promote, PromoteDiv)
 
-import DataFrame.Typed.Schema (AssertPresent, SafeLookup)
+import qualified Data.Vector.Unboxed as VU
+import DataFrame.Typed.Schema (
+    AllKnownSymbol,
+    AssertAllPresent,
+    AssertPresent,
+    SafeLookup,
+    symbolVals,
+ )
 import DataFrame.Typed.Types (TExpr (..), TSortOrder (..))
 import Prelude hiding (maximum, minimum, sum)
 
@@ -528,6 +538,10 @@ sum (TExpr e) = TExpr (F.sum e)
 mean :: (Columnable a, Real a) => TExpr cols a -> TExpr cols Double
 mean (TExpr e) = TExpr (F.mean e)
 
+median ::
+    (Columnable a, Real a, VU.Unbox a) => TExpr cols a -> TExpr cols Double
+median (TExpr e) = TExpr (F.median e)
+
 count :: (Columnable a) => TExpr cols a -> TExpr cols Int
 count (TExpr e) = TExpr (F.count e)
 
@@ -543,6 +557,12 @@ maximum (TExpr e) = TExpr (F.maximum e)
 
 collect :: (Columnable a) => TExpr cols a -> TExpr cols [a]
 collect (TExpr e) = TExpr (F.collect e)
+
+over ::
+    forall (names :: [Symbol]) cols a.
+    (Columnable a, AllKnownSymbol names, AssertAllPresent names cols) =>
+    TExpr cols a -> TExpr cols a
+over (TExpr e) = TExpr{unTExpr = F.over (symbolVals @names) e}
 
 -------------------------------------------------------------------------------
 -- Cast / coercion expressions
@@ -588,6 +608,9 @@ unsafeCastExpr (TExpr e) =
             (fromRight (error "unsafeCastExpr: unexpected Nothing in column"))
             e
         )
+
+toDouble :: (Columnable a, Real a) => TExpr cols a -> TExpr cols Double
+toDouble (TExpr e) = TExpr (F.toDouble e)
 
 -------------------------------------------------------------------------------
 -- Named expression helper

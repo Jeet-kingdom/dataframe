@@ -283,6 +283,11 @@ data Value a where
     -}
     Group :: (Columnable a) => V.Vector Column -> Value a
 
+instance (Show a) => Show (Value a) where
+    show (Scalar v) = show v
+    show (Flat v) = show v
+    show (Group v) = show v
+
 -- | The interpretation context.
 data Ctx
     = FlatCtx DataFrame
@@ -622,7 +627,9 @@ promoteToIntWith onResult col = case col of
 parseWith :: (Read a) => (Either String a -> b) -> String -> b
 parseWith f s = case reads s of
     [(x, "")] -> f (Right x)
-    _ -> f (Left s)
+    _ -> case reads (show s) of
+        [(x, "")] -> f (Right x)
+        _ -> f (Left s)
 
 tryParseWith ::
     forall a b.
@@ -656,7 +663,18 @@ tryParseWith onResult col = case col of
                                         )
                                         v
                     Nothing -> castMismatch @c @b
-    UnboxedColumn _ (_ :: VU.Vector c) -> castMismatch @c @b
+    UnboxedColumn bm (v :: VU.Vector c) -> case bm of
+        Nothing -> Right $ fromVector @b $ V.map (parseWith onResult . show) (V.convert v)
+        Just bitmap ->
+            Right $
+                fromVector @b $
+                    V.imap
+                        ( \i x ->
+                            if bitmapTestBit bitmap i
+                                then parseWith onResult (show x)
+                                else onResult (Left "null")
+                        )
+                        (V.convert v)
 
 {- | When the output type @b@ is @Maybe c@ (or @Maybe (Maybe c)@) and the
 column stores plain @c@ values, wrap each element in 'Just'.
