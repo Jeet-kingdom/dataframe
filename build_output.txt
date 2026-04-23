@@ -1,0 +1,12 @@
+Configuration is affected by the following files:
+- cabal.project
+Build profile: -w ghc-9.6.7 -O1
+In order, the following will be built (use -v for more details):
+ - dataframe-1.1.2.1 (lib) (first run)
+Preprocessing library for dataframe-1.1.2.1...
+Error: [Cabal-7554]
+can't find source for DataFrame/IO/Parquet/Reader in src, dist-newstyle/build/x86_64-linux/ghc-9.6.7/dataframe-1.1.2.1/build/autogen, dist-newstyle/build/x86_64-linux/ghc-9.6.7/dataframe-1.1.2.1/build/global-autogen
+
+Error: [Cabal-7125]
+Failed to build dataframe-1.1.2.1.
+
