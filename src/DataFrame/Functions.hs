@@ -809,3 +809,7 @@ declareColumnsWithPrefix' prefix df =
             sig <- sigD n [t|Expr $(pure ty)|]
             val <- valD (varP n) (normalB [|col $(TH.lift raw)|]) []
             pure [sig, val]
+
+-- | Transpose the DataFrame by swapping rows and columns.
+transpose :: DataFrame -> DataFrame
+transpose = fromRows . List.transpose . toRows
