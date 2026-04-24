@@ -813,3 +813,7 @@ declareColumnsWithPrefix' prefix df =
 -- | Transpose the DataFrame by swapping rows and columns.
 transpose :: DataFrame -> DataFrame
 transpose = fromRows . List.transpose . toRows
+
+-- | Transpose the DataFrame by swapping rows and columns.
+transpose :: DataFrame -> DataFrame
+transpose = fromRows . List.transpose . toRows
